@@ -33,7 +33,6 @@ OOS（Out-of-Sample）で統計的有意なα（t>2）とSharpe≥0.9を確認�
 - ユニバース：東証流動性上位20％  
 - 特徴量：短中期モメンタム、出来高加速、過熱抑制、低ボラ、クイックFA（EPS改定・ROIC等）  
 - 配分：
-  
 $$
 w_i \propto \frac{(Score_i^+)^{\alpha}}{\sigma_i^{\beta}}
 
