@@ -36,9 +36,7 @@ OOS（Out-of-Sample）で統計的有意なα（t>2）とSharpe≥0.9を確認�
   ```
 $$
 w_i \propto \frac{(Score_i^+)^{\alpha}}{\sigma_i^{\beta}}
-\[
 \alpha = 1.0,\quad \beta = 0.5
-\]
 $$
   ```
 - セグメント均等：Large/Mid/Small = 1/3ずつ  
