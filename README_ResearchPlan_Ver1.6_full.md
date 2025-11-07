@@ -73,7 +73,9 @@ OOS（Out-of-Sample）で統計的有意なα（t>2）とSharpe≥0.9を確認�
 
 ### 3.5 GMI（Global Momentum Index）
 ```
-GMI=0.5·Z(S&P先物)+0.3·Z(VIX^-1)+0.2·Z(USDJPY)
+$$
+\text{GMI} = 0.5 \cdot Z(\text{S\&P先物}) + 0.3 \cdot Z(\text{VIX}^{-1}) + 0.2 \cdot Z(\text{USDJPY})
+$$
 ```
 - GMI>0.5→強気寄り、<−0.5→防御寄り  
 - Event週は無効化
