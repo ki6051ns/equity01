@@ -1,0 +1,104 @@
+﻿フォルダー パスの一覧:  ボリューム Windows
+ボリューム シリアル番号は C2F3-1E67 です
+C:.
+|   directory_tree.txt
+|   README.md
+|   requirements.txt
+|   
++---data
+|   |   .gitkeep
+|   |   
+|   +---calendar
+|   |       .gitkeep
+|   |       
+|   +---interim
+|   |       .gitkeep
+|   |       
+|   +---processed
+|   |       .gitkeep
+|   |       
+|   \---raw
+|       |   .gitkeep
+|       |   
+|       +---futures
+|       |       .gitkeep
+|       |       futures_NK=F.csv
+|       |       
+|       +---fx
+|       |       .gitkeep
+|       |       fx_USDJPY.csv
+|       |       
+|       +---prices
+|       |       .gitkeep
+|       |       prices_7203.T.csv
+|       |       
+|       \---vix
+|               .gitkeep
+|               vix_VIXCLS.csv
+|               
++---exec
+|   |   .gitkeep
+|   |   
+|   +---audit
+|   |       .gitkeep
+|   |       
+|   +---backtest
+|   |       .gitkeep
+|   |       
+|   \---live
+|           .gitkeep
+|           
++---features
+|   |   .gitkeep
+|   |   
+|   +---breadth
+|   |       .gitkeep
+|   |       
+|   +---fa_quick
+|   |       .gitkeep
+|   |       
+|   +---gmi
+|   |       .gitkeep
+|   |       
+|   +---momentum
+|   |       .gitkeep
+|   |       
+|   \---volatility
+|           .gitkeep
+|           
++---models
+|   |   .gitkeep
+|   |   
+|   +---ensemble
+|   |       .gitkeep
+|   |       
+|   +---event_guard
+|   |       .gitkeep
+|   |       
+|   +---regime
+|   |       .gitkeep
+|   |       
+|   \---scoring
+|           .gitkeep
+|           
++---research
+|   |   .gitkeep
+|   |   
+|   +---config
+|   |       .gitkeep
+|   |       
+|   +---notebooks
+|   |       .gitkeep
+|   |       
+|   \---reports
+|           .gitkeep
+|           
+\---scripts
+        data_loader.py
+        event_guard.py
+        execution_simulator.py
+        feature_builder.py
+        portfolio_optimizer.py
+        post_loss_analyzer.py
+        regime_engine.py
+        
