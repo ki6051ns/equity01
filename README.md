@@ -1,4 +1,7 @@
 
+
+
+
 '''
 equity01/
 │
@@ -40,6 +43,9 @@ equity01/
     ├─ execution_simulator.py
     └─ post_loss_analyzer.py
 '''
+
+
+
 
 
 # AI駆動・日本株インテリジェント日次トレーディングシステム 研究開発計画書 Ver.1.6
