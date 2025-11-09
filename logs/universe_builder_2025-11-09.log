@@ -1,0 +1,3 @@
+2025-11-09 08:18:25,646 INFO Start universe build asof=2025-11-09 lookback=126 top_ratio=0.2
+2025-11-09 08:18:34,711 WARNING symlink failed, fallback to copy: [WinError 1314] クライアントは要求された特権を保有していません。: '20251109_universe.parquet' -> 'data\\intermediate\\universe\\latest_universe.parquet'
+2025-11-09 08:18:34,722 INFO Done. wrote data\intermediate\universe\20251109_universe.parquet

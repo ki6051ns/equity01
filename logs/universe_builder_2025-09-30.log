@@ -1,0 +1,42 @@
+2025-11-08 14:31:52,898 INFO Start universe build asof=2025-09-30 lookback=126 top_ratio=0.2
+2025-11-08 14:33:13,539 INFO Start universe build asof=2025-09-30 lookback=126 top_ratio=0.2
+2025-11-08 14:33:56,800 INFO Start universe build asof=2025-09-30 lookback=126 top_ratio=0.2
+2025-11-08 14:33:57,005 WARNING symlink failed, fallback to copy: [WinError 1314] クライアントは要求された特権を保有していません。: '20250930_universe.parquet' -> 'data\\intermediate\\universe\\latest_universe.parquet'
+2025-11-08 14:33:57,021 INFO Done. wrote data\intermediate\universe\20250930_universe.parquet
+2025-11-08 14:34:04,970 INFO Start universe build asof=2025-09-30 lookback=126 top_ratio=0.2
+2025-11-08 14:34:05,001 WARNING symlink failed, fallback to copy: [WinError 1314] クライアントは要求された特権を保有していません。: '20250930_universe.parquet' -> 'data\\intermediate\\universe\\latest_universe.parquet'
+2025-11-08 14:34:05,004 INFO Done. wrote data\intermediate\universe\20250930_universe.parquet
+2025-11-08 14:37:33,679 INFO Start universe build asof=2025-09-30 lookback=126 top_ratio=0.2
+2025-11-08 14:40:59,612 INFO Start universe build asof=2025-09-30 lookback=126 top_ratio=0.2
+2025-11-08 14:43:11,393 INFO Start universe build asof=2025-09-30 lookback=126 top_ratio=0.2
+2025-11-08 14:43:12,321 WARNING yfinance failed for 2914.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:12,490 WARNING yfinance failed for 3382.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:12,764 WARNING yfinance failed for 4063.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:12,994 WARNING yfinance failed for 4452.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:13,181 WARNING yfinance failed for 4502.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:13,609 WARNING yfinance failed for 4503.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:13,862 WARNING yfinance failed for 6098.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:14,100 WARNING yfinance failed for 6367.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:14,315 WARNING yfinance failed for 6501.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:14,565 WARNING yfinance failed for 6752.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:14,806 WARNING yfinance failed for 6758.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:15,082 WARNING yfinance failed for 6861.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:15,326 WARNING yfinance failed for 6902.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:15,587 WARNING yfinance failed for 6954.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:15,832 WARNING yfinance failed for 7201.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:16,080 WARNING yfinance failed for 7270.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:16,278 WARNING yfinance failed for 7974.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:16,493 WARNING yfinance failed for 8035.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:16,738 WARNING yfinance failed for 8058.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:16,909 WARNING yfinance failed for 8306.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:17,090 WARNING yfinance failed for 8766.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:17,372 WARNING yfinance failed for 9432.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:17,642 WARNING yfinance failed for 9433.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:17,873 WARNING yfinance failed for 9434.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:18,073 WARNING yfinance failed for 9983.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:18,287 WARNING yfinance failed for 9984.T: arg must be a list, tuple, 1-d array, or Series
+2025-11-08 14:43:18,301 WARNING symlink failed, fallback to copy: [WinError 1314] クライアントは要求された特権を保有していません。: '20250930_universe.parquet' -> 'data\\intermediate\\universe\\latest_universe.parquet'
+2025-11-08 14:43:18,304 INFO Done. wrote data\intermediate\universe\20250930_universe.parquet
+2025-11-08 14:45:22,905 INFO Start universe build asof=2025-09-30 lookback=126 top_ratio=0.2
+2025-11-08 14:45:29,560 WARNING symlink failed, fallback to copy: [WinError 1314] クライアントは要求された特権を保有していません。: '20250930_universe.parquet' -> 'data\\intermediate\\universe\\latest_universe.parquet'
+2025-11-08 14:45:29,571 INFO Done. wrote data\intermediate\universe\20250930_universe.parquet

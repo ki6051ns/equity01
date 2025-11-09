@@ -1,0 +1,21 @@
+asof: "today"                 # 日次運用向け
+lookback: 126
+top_ratio: 0.20
+rebalance_months: [3, 6, 9, 12]
+
+markets: ["Prime", "Standard", "Growth"]
+exclude_types: ["ETF", "REIT", "Preferred", "Warrant"]
+exclude_tickers: []
+
+inputs:
+  listings_csv: "data/raw/jpx_listings/20250930.csv"  # ← 固定スナップショット
+  prices_dir:   "data/raw/prices"
+  source: "auto"
+
+output:
+  dir: "data/intermediate/universe"
+  write_latest_symlink: true
+  latest_name: "latest_universe.parquet"
+logs_dir: "logs"
+
+
