@@ -1,335 +1,269 @@
-CHATGPTで設計+Cursor/proで実装が有効
+📘 AI駆動・日本株インテリジェント日次トレーディングシステム
+研究開発計画書 Ver.2.0（Markdown版）
+― モメンタム×クイックFA＋Breadth PCA＋HMM＋EventGuard＋Intraweek＋Leverage ―
+0. 開発体制と位置付け（Ver.2.0で新設）
+0.1 開発スタック
 
-了解しました。
-4th_commit、確定ですね。これで データ基盤フェーズ（v1.4） が安定完了です。
+ChatGPT：設計・要件定義・体系化担当
 
-Cursor導入は確かに有効です。
-現状の構成なら次のような判断軸が良いでしょう：
+Cursor（無料→有料検討）：実装補助・GitHub連携
 
-観点	無料プラン	有料プラン（月20ドル）	推奨判断
-GitHub連携頻度	週1〜2回程度	毎日push/pullあり	✅ 有料版推奨
-Python/Jupyter併用	一部制限（kernel不可時あり）	完全サポート	⚠️ 研究用途で導入価値あり
-補完精度	GPT-3.5準拠	GPT-4＋project context保存	💡 コーディング効率差大
-equity01規模	scripts少数（現在）	モジュール増大予定	📈 将来的にROI高い
+Claude：コードレビュー・監査専任
 
-したがって、
-「feature層以降に進む前（v1.5〜v1.6の切れ目）」で正式導入判断が妥当です。
-その時点で Cursor + GitHub + ChatGPTの三層開発体制 を正式化すると整合が取れます。
+VSCode / Jupyter：ローカル実行環境
+
+GPT ⇄ Cursor ⇄ GitHub ⇄ Claude の分業で開発コストを最小化する構造
+
+0.2 開発フェーズ（現在位置）
+分析 → 要件定義 → 外部設計 → 内部設計 → ■コーディング（今ここ）
+       → コードレビュー → 単体テスト → 結合テスト → システムテスト → ベータ運用
 
 
+equity01 = 日本株・日次・ロング軸の単体戦略
 
-```
+将来、equity02／forex01／crypto01 と共に ALPHAERS（統合PF） へ接続する基礎ユニット
+
+1. 背景と目的
+
+現物×信用に AI のレイヤー（RegimeGuard, EventGuard, Post-Loss）を重ね、
+「踏まない・負けにくい・回復の早い」日本株アルゴを構築する。
+
+目標：Sharpe ≥ 0.9、Calmar ≥ 0.6、OOS α（t>2）
+
+毎日完結型（日次確定）
+
+SLA・監査可能な実装
+
+2. 成功指標（KPI）
+区分	指標	目標値
+リターン	年率 ≥ 15〜20%	
+Sharpe	≥ 0.9	
+Calmar	≥ 0.6	
+テール	下位5%日損益 ≥ −0.5%	
+運用安定性	夜間SLA 100%×10営業日	
+EventGuard	遅延 ≤ 10分（最大30分）	
+レバ	VAR ≤ 2%	
+3. 戦略構成（ロジック全体）
+
+以下は equity01 の全ロジックレイヤー。
+Ver.2.0 では 3.1 銘柄スコアリングまで実装済み。
+
+3.1 銘柄スコアリング（Ver.2.0で実装完了）
+✔ ユニバース（実装済）
+
+東証流動性上位20％
+
+universe_builder.py → YYYYMMDD_universe.parquet
+
+✔ 価格データ（実装済）
+
+download_prices.py
+
+yfinance / Stooq fallback
+
+JST 換算 & MultiIndex 正規化
+
+✔ 特徴量（実装済）
+
+ret_1 / ret_5 / ret_20
+
+vol_20
+
+Zスコア
+
+ADV
+
+strength / heat_flag
+
+✔ スコア合成（実装済）
+w_i ∝ (Score_i^+)^α / σ_i^β
+(α=1, β=0.5)
+
+✔ Top10 出力（実行済）
+
+run_scoring.py → Top10銘柄（penalized score順）
+
+3.2 β制御（ETF階段＋現物補間）
+
+※ 設計完了・実装前
+
+β目標：0.6 / 0.4 / 0.2
+
+ETF：単元ごとに階段
+
+現物：未満株で連続補間
+
+|Δβ| > 0.1 → β Retune
+
+3.3 レジーム判定（思考層）
+✔ モデル
+
+Breadth PCA
+
+Sticky-HMM
+
+BOCPD
+
+Rule-Logit
+
+❗ Ver.2.0の重大方針（明確化）
+
+レジーム判定ロジックは equity01 から切り出し、
+ALPHAERS（統括PF側）の “グローバルレジームエンジン” へまとめて統合する。
+
+理由
+
+戦略ごとに個別レジームを持つと 整合性が壊れる
+
+マルチストラテジー統合時に β・EventGuard・パリティが衝突
+
+equity01 のみのローカル判定は後工程の 混線リスクが大きい
+
+レジームは「全体の最終仕上げ」レイヤーであり、戦略単体では扱わない方が正しい
+
+運用方針（Ver.2.0）
+
+equity01 は neutral 固定
+
+β制御はミニマム版
+
+EventGuard だけは（局所防御）例外で搭載可能
+
+3.4 EventGuard（反射層）
+
+※ 設計完了・実装は β制御後
+
+3.5 GMI（米株 → 日株）
+
+※ 設計完了・実装前
+
+3.6 Post-Loss Learning
+3.7 Score–Beta Adaptive
+3.8 NF×PR Ensemble
+3.9 Intraweek Overlay
+3.10 Multi-Horizon Ensemble
+3.11 Leverage Control
+
+※ すべて 設計完了 / 実装前
+
+4. データ／システム構成
 equity01/
-│
+├─ configs/
 ├─ data/
-│   ├─ raw/                # 株価・出来高・為替・VIX・先物など生データ
-│   ├─ calendar/           # 祝日・イベントカレンダー（BOJ/FOMC/CPI等）
-│   ├─ processed/          # クレンジング後データ（日次・週次）
-│   └─ interim/            # 一時保存（特徴量中間生成物など）
-│
+│   ├─ raw/
+│   ├─ intermediate/universe/
+│   ├─ processed/
+│   └─ calendar/
 ├─ features/
-│   ├─ momentum/           # 短中期リターン・加速度
-│   ├─ breadth/            # 上昇/下落比率・新高値率など
-│   ├─ fa_quick/           # EPS改定・ROIC・FCFマージン
-│   ├─ volatility/         # σ・ATR・回転率
-│   └─ gmi/                # 米株→日株モメンタム指標（S&P/VIX/USDJPY）
-│
 ├─ models/
-│   ├─ regime/             # HMM・BOCPD・Logit
-│   ├─ scoring/            # Ridge/Lasso/Tree系スコアリング
-│   ├─ event_guard/        # イベント検知モデル
-│   └─ ensemble/           # NF×PR統合モジュール
-│
 ├─ exec/
-│   ├─ backtest/           # バックテスト出力（PnL, trades, βなど）
-│   ├─ live/               # ペーパートレード（orders_YYYYMMDD.csv）
-│   └─ audit/              # 監査ログ・Post-Loss原因コード
-│
 ├─ research/
-│   ├─ notebooks/          # 分析用ノートブック（EDA, WF, Ensemble検証）
-│   ├─ reports/            # KPI・MCS・回転・相関レポート
-│   └─ config/             # ハイパーパラメータ・閾値設定
-│
 └─ scripts/
-    ├─ data_loader.py
-    ├─ feature_builder.py
-    ├─ regime_engine.py
-    ├─ event_guard.py
-    ├─ portfolio_optimizer.py
-    ├─ execution_simulator.py
-    └─ post_loss_analyzer.py
-```
 
 
+Ver.2.0 現在：DataLoader／Universe／Scoring が完成し、下層が完全稼働。
 
-# AI駆動・日本株インテリジェント日次トレーディングシステム 研究開発計画書 Ver.1.6
-### ― モメンタム×クイックFA＋Breadth PCA＋HMM＋EventGuard＋Intraweek＋Leverage ―
+5. 検証（Ver.2.0明文化）
+5.1 カットオフ政策の検証（必須）
 
----
+08:00 JST 統一カットオフの妥当性
 
-## 1. 背景と目的
+D-1補正との比較
 
-従来の裁量・高速依存型デイ戦略では汎用性・安定性・再現性に乏しい。  
-現物・信用を併用しつつ、AIによるレジーム制御とイベント防御を備えた**日次完結型トレーディング基盤**を構築する。  
-OOS（Out-of-Sample）で統計的有意なα（t>2）と Sharpe ≥ 0.9 を確認し、完全自動（RPA）＋SLA管理下で稼働可能なフレームを実装する。
+DM統計・Sharpe差分で最適化
 
----
+5.2 比較モデル
 
-## 2. 成功指標（KPI）
+逆ボラ
 
-| 区分 | 指標 | 目標値 |
-|---|---|---|
-| リターン | 年率リターン（原資基準） | ≥ 15–20% |
-| リスク調整 | Sharpe | ≥ 0.9 |
-| 安定性 | Calmar | ≥ 0.6 |
-| テールリスク | 下位5%日損益 | ≥ −0.5%以内 |
-| 運用安定性 | 夜間SLA達成率 | 100%（連続10営業日） |
-| レバ管理 | 1日VAR（原資基準） | ≤ 2% |
-| EventGuard遅延 | 平均 ≤ 10分、最大 ≤ 30分 |
-| Post-Loss反応 | 翌日適用率 100% |
+EW
 
----
+最小分散
 
-## 3. 戦略構成
+MOM系多数
 
-### 3.1 銘柄スコアリング
+βヘッジ
 
-- **ユニバース**：東証流動性上位20％  
-- **特徴量**：短中期モメンタム、出来高加速、強さ指標、過熱抑制、低ボラ、クイックFA（EPS改定・ROIC 等）  
-- **合成**：分位スコア＋ペナルティ（過熱／スプレッド／ADV）  
-- **配分式**：  
-  \[
-  w_i \propto \frac{(Score_i^+)^\alpha}{\sigma_i^\beta} \quad (\alpha=1.0,\ \beta=0.5)
-  \]
-- **セグメント均等**：Large/Mid/Small = **1/3ずつ**  
-- **βドミナンス制約**：\(|β_i|·w_i ≤ 0.05\)  
-- **Breadth補完**：相関一様化時に分散項を目的関数へ加重
+Overnight / IW
 
----
+5.3 テスト＝説明可能性の検証（重要）
 
-### 3.2 β制御（現物＋ETF階段）
+テストが 合格となる条件：
 
-- **β目標**：0.6 / 0.4 / 0.2（強気 / 中立 / 防御）  
-- **実装**：ETFで階段（単元発注）、現物は未満株で補間（連続近似）  
-- **実効β**：  
-  \[
-  β_{eff} = β_{long} - β_{ETF}\cdot(Q_{ETF}/NAV)
-  \]
-- **逸脱対応**：|Δβ| > 0.1 で β Retune（目標段下げ＋ETF±1単元）
+市場環境・イベントを踏まえ 判断理由を説明できる
 
----
+勝因・敗因を言語化 できる
 
-### 3.3 レジーム判定（思考層｜日〜週）
+説明と結果が 整合
 
-- **モデル**：Breadth PCA ＋ Sticky-HMM ＋ BOCPD ＋ Rule-Logit  
-- **検出**：R ≥ θH → 強気、R ≤ θL → 防御（ヒステリシス）  
-- **安全装置**：Breadth −2σ 新規停止、−3σ 撤退  
-- **WF**：学習 180 日／運用 60 日、最小滞在 5 日、PSI 監視
+説明不能は 改良対象（先送り禁止）
 
----
+説明できるまでが単体テストの完了条件
+— レジーム統合以前の最重要QA項目。
 
-### 3.4 EventGuard（反射層｜秒〜時間）
+6. 開発プロセスと ALPHAERS との接続
+6.1 equity01 = 単体テスト
 
-- **トリガー例**：
-  - 先物 5 分リターン ≤ −1.0%
-  - USDJPY 10 分変化 ≥ 1.5σ（円高方向は厳格）
-  - VIX 30 分 +10%
-  - 重要度 ≥ 4 のイベント（BOJ/FOMC/CPI/NFP 等）
-- **作動**：新規停止＋引成クローズ、β = 0.2、通知（Slack/LINE）  
-- **継続**：最低 5 営業日。解除は Breadth 改善連続 4 日で  
-- **SLA**：発動遅延 平均 ≤ 10 分、最大 ≤ 30 分
+ペーパートレードは equity01 ローカルの単体テスト
 
----
+ロジック破綻・データ破綻の確認
 
-### 3.5 GMI（Global Momentum Index｜米株⇒日株）
+説明可能性の担保
 
-\[
-GMI = 0.5\cdot Z(S\&P\ 先物) + 0.3\cdot Z(VIX^{-1}) + 0.2\cdot Z(USDJPY)
-\]
+6.2 ALPHAERS = 結合テスト／システムテスト
 
-- 8:00 時点で算出。**GMI > 0.5** → 強気寄り、**< −0.5** → 防御寄り  
-- イベント前後（±1日）は **無効化**（EventGuard優先）
+全ストラテジー（equity, forex, crypto etc.）の相関・β・EventGuardを統合
 
----
+レジーム判定は ALPHAERS 側で一元管理
 
-### 3.6 Post-Loss Learning（翌日反映）
+パリティ配置も ALPHAERS が担当
 
-- **原因コード**：EVT / REG / βMis / MOM崩壊 / LQX / CEX などを自動付与  
-- **翌日からの安全側アクション（7 日で指数関数的に復帰）**：
-  - EVT：閾値強化、重要度格上げ、GMI ブラックアウト延長
-  - βMis：β 目標 −0.2、ETF ±1 単元補正
-  - MOM 崩壊：モメ重み −30%、低ボラ加点、建玉縮小
-  - LQX：ADV 上限 1.5%、スプレッド罰則強化
-- **反実仮想**：ノートレ／β=0.2／モメ縮小を生成 → 週次の A/B で採択
+equity01 の β制御だけ独立稼働 → 最終的に統合予定
 
----
+6.3 ベータ運用（2026 Q1〜）
 
-### 3.7 Adaptive Loop（Score–Beta）
+手動運転＋準自動（RPA）
 
-- **Score Drift**：SHAP ドリフト > 1.5σ × 3 日 → **20 日 Ridge 再訓練**  
-- **β Drift**：|βeff − βtarget| > 0.1 × 3 日 → **βRetune**（目標段下げ＋HMM 閾値微調整）  
-- **銘柄ローテ**：スコア Z > 2 かつ PnL < −1σ → 次点銘柄に交替  
-- **頻度**：日次 Quick-Fit／週次 Full-Fit／月次 Feature 再選抜
+SLA・監査ログを構築
 
----
+Event／β逸脱／Post-Loss対応を定期検証
 
-### 3.8 Ensemble（NF × PR）
+7. 開発スケジュール
+Phase	内容	状態
+P1	DataLoader / Universe	完了
+P2	Feature & Scoring	完了
+P3	β制御・cutoff_policy	これから
+P4	EventGuard / GMI	設計済
+P5	IW / Multi-Horizon	設計済
+P6	Leverage / Post-Loss	後続
+P7	PoC ペーパー運用	2026
+P8	Fat-Trim	2026
+8. 成果物
 
-- **NF（Noise-Filtered）**：痛みは記録のみ、週次で統計反映（安定・低回転）  
-- **PR（Pain-Responsive）**：痛みを短期に**安全側**へ反映（縮小・ペナルティ中心）  
-- **ゲーティング**：
-  - EventGuard = ON → w_NF = 0.9、w_PR = 0.1
-  - Breadth PC1 高（≥ 0.8）→ NF 寄せ
-  - GMI 強気・平常相関 → PR 最大 0.6 まで許容
-- **乖離キルスイッチ**：corr(w_NF, w_PR) < 0.2 → βtarget = 0.2、PR 上限 0.3  
-- **仕上げ**：共分散最適化（β制約・回転上限 τ=0.06）
+Python ソース一式
 
----
+universe parquet
 
-### 3.9 Intraweek Overlay（週跨ぎ禁止｜IW）
+prices csv
 
-- **運用範囲**：月〜金の**週内完結**。週末・祝前日は**完全クローズ**  
-- **β**：0.5 / 0.35 / 0.2（強気／中立／防御）  
-- **金曜運用**：14:30 新規停止、14:50 強制フラット  
-- **Event/祝前**：新規禁止＋β = 0.2
+scores parquet（予定）
 
-**Overnight（平日内のみ）**
+orders.csv / audit
 
-| 区間 | 可否 | 代表シグナル |
-|---|---|---|
-| 月→木 間 | 可 | 低ボラ・決算ドリフト・GMI 追随 |
-| 木→金 | 条件付可 | Event/祝前は不可 |
-| 金→月 | **禁止** | — |
+PoC 報告書
 
-**適性管理**
+運用手順書
 
-- **固定型**：低ボラ・Quality・決算ドリフト・セクター相対強度・GMI 追随 = 可／デイ・リバーサル・ギャップ回帰 = 不可  
-- **動的型**：同セクター×同レジーム×同 GMI 帯で VaR < 1.5% なら可（当面は Shadow 運用）
+9. 結論
 
----
+EventGuard × RegimeGuard × Post-Loss × Ensemble × IW × Leverage
+により、「踏まない・負けにくい・回復の早い」日本株アルゴが成立する。
 
-### 3.10 Multi-Horizon Ensemble（D × IW）
+Ver.2.0 の到達点：
 
-\[
-w = \gamma\, w^{(D)} + (1-\gamma)\, w^{(IW)}
-\]
+データ基盤 → ユニバース → スコアリング
+までを正式に実装完了。
 
-- **ゲート**：EventGuard = ON → γ = 0.8／週内 Breadth 悪化 → γ = 0.6／木曜後半・祝前 → IW 縮小  
-- **乖離時**：corr(D, IW) < 0.3 → β = 0.2、IW 縮小  
-- **仕上げ**：共分散最適化（β制約・L1 近接 τ=0.06）
+これにより β制御・EventGuard 以降の “戦略ロジック中核フェーズ” に進める状態となった。
 
----
-
-### 3.11 Leverage Control（信用 2–3 倍）
-
-- **最大建玉倍率**：2.0–3.0×（現物＋信用）  
-- **原資 1 日 VAR ≤ 2%**, **βcap = 0.9**  
-- **Event 週**：自動で 1.0× 上限  
-- **維持率 60% 警戒**：即時縮小（RPA 通知）
-
-**レジーム別レバ例**
-
-| レジーム | β目標 | 想定レバ |
-|---|---|---|
-| 強気 | 0.6 | 2.5x |
-| 中立 | 0.4 | 1.8x |
-| 防御 | 0.2 | 1.2x |
-
-**YAML 例**
-
-```yaml
-leverage:
-  enable: true
-  gross_limit: 2.5
-  net_beta_cap: 0.9
-  capital_risk_limit: 0.02   # 原資1日VAR
-  stop_trigger_sigma: -2.5
-```
-
----
-
-## 4. データ／分析構成
-
-```
-/data/raw            (prices, volume, fx, vix, futures, calendar)
-/data/weekly_raw     (週次終値・為替)
-/feature             (momentum, breadth, fa_quick, gmi)
-/feature/weekly      (mom20/60/120, breadth_w, fa_quick_w)
-/labels              (regime, event_flags)
-/models              (score_v*, hmm_v*, ridge_lasso_)
-/exec                (orders_YYYYMMDD.csv, audit_logs)
-/ops                 (event_days.csv, runbooks)
-/research            (backtest, param_grid, spa_mcs, shadow_runs)
-```
-
----
-
-## 5. 検証
-#### カットオフ整合性検証（追加）
-データ更新時刻の差異（株式・為替・VIX・先物）を考慮し、  
-08:00 JST を基準とする統一カットオフの妥当性を検証する。  
-1. 各ソースの更新完了時刻をログ化し、前営業日データとの時系列差を比較。  
-2. D-1補正方式および固定カットオフ方式の双方で統計的影響を評価。  
-3. Sharpe, Calmar, DM統計などのOOS指標変化をもとに最適方式を確定。  
-本検証により、データ・モデル双方の再現性を定量的に担保する。
-
-
-- **比較モデル**：逆ボラ／EW／最小分散／短中期 MOM／低ボラ／VolTarget／Overnight/Intraday／βヘッジ（計 15 本）  
-- **WFA**：日次・IW を個別に WF → 最終合成を評価  
-- **統計**：SPA／MCS／Diebold–Mariano（OOS のみ採点）  
-- **レポート**：Sharpe, Calmar, MaxDD, 相関崩壊期挙動, 回転, コスト, β逸脱
-
----
-
-## 6. 運用／RPA 実行
-
-- **現物＝金額発注（未満株）**, **ETF＝単元発注**  
-- `orders.csv` 例：
-
-```
-ticker,mode,value,volume,notes
-7203,amount,180000,,stock
-1571,shares,,100,etf_inverse
-```
-
-- **監査**：実効β、Event 発動時刻、Post-Loss 適用ログを保存（スクショ＋CSV）
-
----
-
-## 7. ガバナンス
-
-- 日次変更は**原因コード**に紐付く軽微調整のみ  
-- 週次で構造更新（モデル再学習・閾値調整）  
-- データ保全：BitLocker＋Git-LFS、再現率 ≥ 95%  
-- 監査項目：Event／β逸脱／PnL 分解／ペイン統計／A/B 影運用結果
-
----
-
-## 8. 開発スケジュール
-
-| Phase | 内容 | 期間 |
-|---|---|---|
-| P0 | MANUS環境構築・Git連携 | 〜 11/10 |
-| P1 | 日次 Feature 実装 | 〜 11/17 |
-| P2 | HMM ＋ EventGuard 稼働 | 〜 11/24 |
-| P3 | Adaptive ＋ NF×PR 統合 | 〜 12/05 |
-| P4 | Intraweek ＋ Multi-Horizon | 〜 12/20 |
-| P5 | PoC ペーパートレード（10 営業日） | 1 月 |
-| P6 | Fat-Trim（特徴削減・回転抑制） | 2 月〜 |
-
----
-
-## 9. 成果物
-
-- Python 3.11 ソース一式（MANUS 連携）  
-- `orders_YYYYMMDD.csv`／`event_days.csv`  
-- KPI／MCS／Latency／Leverage レポート  
-- PoC 報告書、運用手順書（EventGuard／Ensemble／Intraweek）
-
----
-
-## 10. 結論
-
-> **EventGuard（反射） × RegimeGuard（思考） × Post-Loss（学習） × Ensemble（NF×PR） × Intraweek（時間分散） × Leverage（資本効率）**  
-> 現物×信用×AI統合により「踏まない・負けにくい・早く立ち直る」日本株日次アルゴを実現する。  
-> 2026年1月までに PoC を完了し、同年第2四半期に量産運用フェーズへ移行予定。
+レジーム判定は equity01 から切り出し、ALPHAERS に統合する方針を確定。
