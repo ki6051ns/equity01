@@ -1,0 +1,98 @@
+ticker,market,type,name,sector
+7203.T,Prime,Common,Toyota Motor,Automobiles
+9984.T,Prime,Common,SoftBank Group,Technology
+9432.T,Prime,Common,Nippon Telegraph and Telephone,Telecommunications
+6758.T,Prime,Common,Sony Group,Technology
+6861.T,Prime,Common,Keyence,Electronics
+8035.T,Prime,Common,Tokyo Electron,Semiconductors
+4502.T,Prime,Common,Takeda Pharmaceutical,Pharmaceuticals
+8306.T,Prime,Common,Mitsubishi UFJ Financial Group,Banks
+8058.T,Prime,Common,Mitsubishi Corporation,Conglomerates
+7974.T,Prime,Common,Nintendo,Entertainment
+6954.T,Prime,Common,Fanuc,Industrial Machinery
+9433.T,Prime,Common,KDDI,Telecommunications
+9434.T,Prime,Common,SoftBank Corp,Telecommunications
+2914.T,Prime,Common,Japan Tobacco,Consumer Staples
+8766.T,Prime,Common,Tokio Marine Holdings,Insurance
+4063.T,Prime,Common,Shin-Etsu Chemical,Chemicals
+3382.T,Prime,Common,Seven & i Holdings,Retail
+9983.T,Prime,Common,Fast Retailing,Apparel
+6367.T,Prime,Common,Daikin Industries,Industrials
+4503.T,Prime,Common,Astellas Pharma,Pharmaceuticals
+6902.T,Prime,Common,Denso,Auto Parts
+6501.T,Prime,Common,Hitachi,Industrial Conglomerates
+6752.T,Prime,Common,Panasonic,Electronics
+6098.T,Prime,Common,Recruit Holdings,Services
+4452.T,Prime,Common,Kao,Consumer Staples
+7201.T,Prime,Common,Nissan Motor,Automobiles
+7270.T,Prime,Common,Subaru,Automobiles
+8308.T,Prime,Common,Resona Holdings,Financials
+8316.T,Prime,Common,Sumitomo Mitsui Financial Group,Financials
+8750.T,Prime,Common,Dai-ichi Life Holdings,Insurance
+7182.T,Prime,Common,Japan Post Bank,Financials
+8601.T,Prime,Common,Daiwa Securities,Financials
+8604.T,Prime,Common,Nomura Holdings,Financials
+8697.T,Prime,Common,Japan Exchange Group,Financials
+8572.T,Prime,Common,Acom,Financials
+8411.T,Prime,Common,Mizuho Financial Group,Financials
+8761.T,Prime,Common,Sompo Holdings,Insurance
+8031.T,Prime,Common,Mitsui & Co.,Trading Companies
+8001.T,Prime,Common,Itochu,Trading Companies
+8053.T,Prime,Common,Sumitomo Corporation,Trading Companies
+9501.T,Prime,Common,Tokyo Electric Power,Utilities
+9502.T,Prime,Common,Chubu Electric Power,Utilities
+9503.T,Prime,Common,Kansai Electric Power,Utilities
+9020.T,Prime,Common,JR East,Transportation
+9021.T,Prime,Common,JR West,Transportation
+9022.T,Prime,Common,JR Central,Transportation
+9005.T,Prime,Common,Tokyu,Transportation
+9007.T,Prime,Common,Odakyu Electric Railway,Transportation
+9001.T,Prime,Common,Tobu Railway,Transportation
+9003.T,Prime,Common,Sotetsu Holdings,Transportation
+9101.T,Prime,Common,Nippon Yusen,Marine Transport
+9104.T,Prime,Common,Mitsui O.S.K. Lines,Marine Transport
+9107.T,Prime,Common,Kawasaki Kisen Kaisha,Marine Transport
+3092.T,Prime,Common,ZOZO,Retail
+3064.T,Prime,Common,MonotaRO,Retail
+3387.T,Prime,Common,Seven & I Holdings,Retail
+3086.T,Prime,Common,J. Front Retailing,Retail
+3099.T,Prime,Common,Mitsukoshi Isetan,Retail
+4324.T,Prime,Common,Dentsu Group,Services
+4689.T,Prime,Common,Z Holdings,Internet
+4751.T,Prime,Common,CyberAgent,Internet
+9766.T,Prime,Common,Konami Group,Entertainment
+4901.T,Prime,Common,FujiFilm Holdings,Healthcare
+4507.T,Prime,Common,Shionogi,Pharmaceuticals
+4578.T,Prime,Common,Otsuka Holdings,Pharmaceuticals
+3289.T,Prime,Common,Tokyu Fudosan,Real Estate
+6502.T,Prime,Common,Toshiba,Technology
+6503.T,Prime,Common,Mitsubishi Electric,Technology
+6981.T,Prime,Common,Murata Manufacturing,Technology
+6723.T,Prime,Common,Renesas Electronics,Technology
+6361.T,Prime,Common,Ebara,Industrials
+7011.T,Prime,Common,Mitsubishi Heavy Industries,Industrials
+7012.T,Prime,Common,Kawasaki Heavy Industries,Industrials
+6988.T,Prime,Common,Nitto Denko,Materials
+6762.T,Prime,Common,TDK,Technology
+6952.T,Prime,Common,Casio Computer,Technology
+4042.T,Prime,Common,Tosoh,Chemicals
+4061.T,Prime,Common,AGC,Chemicals
+6301.T,Prime,Common,Komatsu,Industrials
+6305.T,Prime,Common,Hitachi Construction Machinery,Industrials
+6504.T,Prime,Common,Fuji Electric,Industrials
+6701.T,Prime,Common,NEC,Technology
+6702.T,Prime,Common,Fujitsu,Technology
+7731.T,Prime,Common,Nikon,Technology
+7735.T,Prime,Common,SCREEN Holdings,Technology
+6471.T,Prime,Common,NSK,Industrials
+6472.T,Prime,Common,NTN,Industrials
+6473.T,Prime,Common,JTEKT,Industrials
+7004.T,Prime,Common,Hitachi Zosen,Industrials
+7014.T,Prime,Common,Nomura Research Institute,Services
+7202.T,Prime,Common,Isuzu Motors,Automobiles
+7259.T,Prime,Common,Aisin,Auto Parts
+8037.T,Prime,Common,Kakaku.com,Internet
+9024.T,Prime,Common,Seibu Holdings,Transportation
+2413.T,Prime,Common,M3,Services
+2412.T,Prime,Common,Benefit One,Services
+8267.T,Prime,Common,Aeon,Retail
