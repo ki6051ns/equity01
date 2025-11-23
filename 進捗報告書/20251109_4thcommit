@@ -1,0 +1,114 @@
+# 🧾 equity01 データ基盤構築進捗報告書  
+### （4th_commitまで／2025年11月9日時点）
+
+---
+
+## 1. 開発目的
+
+AI駆動・日本株インテリジェント日次トレーディングシステムの研究開発に向け、  
+**信頼性の高いマルチアセット＋株式ユニバース基盤**を構築する。  
+
+v1.3で確立した価格取得基盤を発展させ、  
+v1.4では「東証流動性上位20％」による**ユニバース定義・スナップショット管理**を実装した。
+
+---
+
+## 2. 現在の成果（v1.4 / 4th_commit）
+
+| 項目 | 概要 | ステータス |
+|------|------|-------------|
+| **DataLoader基盤** | 株価・為替・VIX・先物の日次取得モジュール | ✅ 安定稼働 |
+| **ユニバース構築 (`universe_builder.py`)** | 東証上場銘柄のうち流動性上位20％を抽出 | ✅ 完成 |
+| **流動性スコア算定** | 売買代金平均をベースにランク付け | ✅ 完成 |
+| **フォールトトレラント構成** | yfinanceフォールバック＋MultiIndex対応 | ✅ 改良 |
+| **JST日付補正／スナップショット運用** | `--asof`オプションによる任意日指定 | ✅ 実装済 |
+| **設定管理 (`universe.yml`)** | 比率・除外銘柄・市場をYAMLで管理 | ✅ 導入 |
+| **出力構成** | `data/intermediate/universe/YYYYMMDD_universe.parquet` | ✅ 完全動作 |
+| **ローカル検証ノート（研究用）** | `universe_validation.ipynb` 試作完了（廃棄・次期刷新へ） | ⚠️ 検証限定 |
+
+---
+
+## 3. 技術的成果ポイント
+
+- **Python 3.8互換化対応**  
+  型ヒント(`dict[str]`→`Dict[str]`)と辞書演算子を修正。  
+- **yfinance / MultiIndex 安定化**  
+  `Close/Volume` の多層列を自動正規化。  
+- **ファイルフォールバック機構**  
+  `latest_universe.parquet` が無い場合、最新スナップショットを自動選択。  
+- **スナップショット運用設計**  
+  `data/raw/jpx_listings/YYYYMMDD.csv` を四半期末ごとに固定し、生存バイアスを排除。  
+- **CLI 実行構造**  
+  `--asof` オプションにより任意営業日を再現可能（例：`--asof 2025-09-30`）。  
+
+---
+
+## 4. 実行結果サンプル（2025-11-09）
+
+Start universe build asof=2025-11-09 lookback=126 top_ratio=0.2
+{
+"asof": "2025-11-09",
+"count_all": 27,
+"count_top": 6,
+"top10_preview": [
+{"ticker": "9984.T", "avg_turnover": 2.24e+11, "liquidity_rank": 1},
+{"ticker": "8035.T", "avg_turnover": 1.17e+11, "liquidity_rank": 2},
+{"ticker": "8306.T", "avg_turnover": 8.95e+10, "liquidity_rank": 3},
+{"ticker": "7203.T", "avg_turnover": 7.54e+10, "liquidity_rank": 4},
+{"ticker": "7974.T", "avg_turnover": 6.54e+10, "liquidity_rank": 5},
+{"ticker": "6501.T", "avg_turnover": 5.60e+10, "liquidity_rank": 6}
+]
+}
+Done. wrote data\intermediate\universe\20251109_universe.parquet
+
+
+
+---
+
+## 5. 検証状況と課題
+
+| 観点 | 現状 | コメント |
+|------|------|----------|
+| **一致率（日次変化）** | △（空） | スナップショットが1本のみ。過去日を複数生成すれば算出可。 |
+| **セクター偏り** | △ | listingsに`sector`列が未整備。**今後の課題として拡充予定。** |
+| **OOS安定性検証** | △ | 履歴データ蓄積後に検証予定。 |
+| **流動性・規模分布** | △ | `market_cap`未実装。今後追加予定。 |
+| **グラフ出力** | ○ | バー・ヒストグラム動作確認済み。 |
+| **ノートブック** | ⚠️ | `universe_validation.ipynb` は動作確認用に留め、次期再設計へ。 |
+
+---
+
+## 6. 今後の課題（次期フェーズ計画）
+
+| フェーズ | タスク | 優先度 | 備考 |
+|-----------|---------|--------|------|
+| **v1.5** | `cutoff_policy` 実装（08:00 JST基準） | ★★★ | 特徴量整列のため |
+| **v1.6** | `feature_builder.py` 開発（return, vol, regime） | ★★★ | 特徴量層開始 |
+| **v1.7** | dataset_manager.py（split／欠損補完） | ★★☆ | AI訓練用 |
+| **v1.8** | model_trainer.py（HMM, PCA, MOM） | ★★☆ | PoC段階 |
+| **v1.9** | universe_validation_v2.ipynb 再構築 | ★★☆ | セクター・一致率・OOS安定性検証を統合 |
+| **長期課題①** | 上場リスト自動更新・スナップショット化 | ★★★ | JPX公式データ連携検討 |
+| **長期課題②** | **listingsの拡充（sector・market_cap等の追加）** | ★★★ | 次期フェーズで実施 |
+| **長期課題③** | クロスアセット（ETF/先物）ユニバース統合 | ★★☆ | レジーム判定連携 |
+
+---
+
+## 7. 所感
+
+v1.4では「価格」から「銘柄集合」へと対象が拡張され、  
+データ基盤としての**縦軸（期間）＋横軸（ユニバース）**の両輪が揃った。  
+
+JST補正・証明書問題・フォールバック処理などの初期障害を完全に克服し、  
+本格的な特徴量生成（feature_builder層）への移行条件が整った段階である。  
+
+**listingsの拡充（セクター・時価総額など）**は今後の重要課題として整理し、  
+本フェーズではスナップショット管理までを完了とする。  
+
+---
+
+*Prepared by equity01 project / Data Infrastructure Report – November 9, 2025 (4th_commit)*
+
+
+
+
+
