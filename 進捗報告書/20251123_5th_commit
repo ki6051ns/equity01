@@ -1,0 +1,139 @@
+🧾 equity01 進捗報告書（5th_commit版）
+2025年11月23日時点
+1. 開発目的
+
+AI駆動・日本株インテリジェント日次トレーディングシステムの開発に向け、
+スコアリング（3.1）までを完全に実装し、単体戦略レベルの投資判断を再現可能にする
+ことを本フェーズの主目的とする。
+
+4th_commitでは ユニバース（流動性上位20%）の構築基盤を確立。
+5th_commitでは 特徴量生成＋スコアリング層（3.1） が完成し、
+equity01 は 日次投資判断の根幹となる「銘柄スコアリング」 を稼働できる段階に到達した。
+
+2. 現在の成果（v1.5 / 5th_commit）
+項目	概要	ステータス
+Universe Builder v1.2	流動性上位20％抽出（27銘柄）	✅ 完了
+Auto Price Downloader	全ユニバースの価格CSVを自動生成	✅ 完了
+Feature Builder v1.1	return/vol/ADV/strength/heat/Zscore生成	✅ 完成
+Scoring Engine v1.0	penalized score＋σ補正＋重み算出	✅ 完成
+スコア上位10銘柄の選抜	9434/3382/9432 等、安定動作	✅ 確認
+説明可能性(QA)要件の導入	勝因/敗因/市場整合性のチェック基準を導入	✅ 策定
+cutoff_policy準備	D-1 → 08:00 JST 整列方針を確定	🔄 次工程
+β制御前段処理	ETF / index loader の接続準備	🔄 次工程
+scoring_validation notebook	スコア分布・相関チェック用に稼働	⚠️ 保存周りは後続
+3. 技術的成果ポイント
+（1）Price Downloader による完全自動化
+python scripts/download_prices.py --asof TODAY
+
+
+で 27銘柄分の過去データ（2015→asof）が一括生成される。
+
+これにより：
+
+feature_builder の入力が完全自動化
+
+スコア計算までの流れがワンショット化
+
+日別バックフィル／過去日再現が容易に
+
+データ基盤は 研究用途→実運用に耐える品質に到達。
+
+（2）Feature Builder v1.1 が実運用レベルに進化
+
+生成される特徴量：
+
+ret_1 / ret_5 / ret_20
+
+vol_20
+
+Z(ret_5), Z(ret_20)
+
+ADV（流動性）
+
+strength（強度）
+
+heat_flag（過熱抑制）
+
+dtype変換・NaN処理・銘柄整形を内包し、
+株式データの自然言語的ゆらぎ（MultiIndex/str混入）を完全吸収している。
+
+（3）Scoring Engine v1.0 が稼働
+
+式：
+
+w_i ∝ (score_i^+)^α / σ_i^β
+  （α=1.0, β=0.5）
+
+
+ログ出力例：
+
+Top 10 by penalized score:
+9434.T   score=1.188   σ=0.0096   weight=0.1215
+3382.T   score=0.969   σ=0.0132   weight=0.1215
+9432.T   score=0.937   σ=0.0113   weight=0.1215
+9433.T   score=0.5367  σ=0.0126   weight=0.1215
+6902.T   score=0.5010  σ=0.0197   weight=0.1215
+...
+
+
+モメンタム・ボラ抑制・過熱抑制が整合的に計算され、
+3.1 の要件（“銘柄スコアリング完成”）を満たしている。
+
+（4）6th_commit以降のための QA（説明可能性）基準策定
+
+ペーパートレードのクリア条件：
+
+なぜその判断になったか説明できる
+
+市場環境（レジーム）との整合性
+
+勝因／敗因の抽出
+
+非合理な挙動は改良対象
+
+単体テスト段階では 理由の言語化が必須。
+（説明不可の勝ち＝危険な偶然／説明不可の負け＝ロジック欠陥）
+
+4. 実行結果サンプル
+[run_scoring] config: configs/scoring.yml
+
+Top 10 by penalized score:
+9434.T   1.1880   σ=0.0096   weight=0.1215
+3382.T   0.9692   0.0132     0.1215
+9432.T   0.9375   0.0113     0.1215
+9433.T   0.5367   0.0126     0.1215
+6902.T   0.5010   0.0197     0.1215
+6861.T   0.4094   0.0177     0.1215
+4063.T   0.2013   0.0135     0.0915
+6098.T   0.1986   0.0429     0.0507
+4503.T   0.1195   0.0182     0.0468
+6758.T   0.0901   0.0231     0.0313
+
+5. 検証状況と課題
+観点	現状	コメント
+スコア分布	○	validation notebookで正常可視化
+特徴量との相関	○	ret/vol/adv など整合確認
+ユニバースの一致率	△	過去スナップショット積み増し後に実施
+セクター偏り検証	△	listings に sector が未整備（今後拡張）
+β算出	△	index loader 段階、ETFは未接続
+cutoff（08:00）	△	6th_commit で実装予定
+スコア保存	△	parquet保存が次工程（6th）
+6. 今後の課題（6th〜7th commit計画）
+フェーズ	タスク	優先度
+6th_commit	scoring 保存（latest_scores.parquet）	★★★
+	cutoff_policy（08:00 JST）	★★★
+	ETF/index loader	★★★
+	スコア検証 notebook 改良	★★☆
+7th_commit	β制御（3.2）実装	★★★
+	EventGuard（部分）接続	★★☆
+	レジーム内部版（凍結仕様）確認	★★☆
+7. 所感
+
+5th_commitでは データ基盤（縦軸）＋特徴量層（横軸）＋スコア層（投資判断） の3層が揃い、
+equity01 は戦略ロジックの心臓部である「銘柄スコアリング」を完成させた。
+
+残タスクは β制御（3.2）〜イベント処理（3.4） の実装が中心となる。
+説明可能性を基準にした QA フローの導入により、改良プロセスが標準化され、
+equity01 を “単体テスト（single-strategy papertrade）” に移行できる状態となった。
+
+Prepared by equity01 project / Strategy Core Layer Report – November 23, 2025 (5th_commit)
