@@ -1,4 +1,4 @@
-cursorは使えるが、月#20かかるので有料導入を検討する。CHATGPTで設計+Curosrで実装が有効
+CHATGPTで設計+Cursor/proで実装が有効
 
 了解しました。
 4th_commit、確定ですね。これで データ基盤フェーズ（v1.4） が安定完了です。
