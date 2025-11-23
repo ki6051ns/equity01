@@ -189,6 +189,7 @@ def main():
         listings = listings[~listings["ticker"].isin(cfg["exclude_tickers"])]
 
     tickers = sorted(listings["ticker"].unique().tolist())
+    logging.info(f"個別株銘柄数: {len(tickers)}銘柄")
     source = cfg["inputs"].get("source","auto").lower()
 
     prices = {}
@@ -216,6 +217,8 @@ def main():
 
     uni = uni.sort_values("avg_turnover", ascending=False).reset_index(drop=True)
     k = max(1, int(math.ceil(len(uni)*top_ratio)))
+    # top_ratioに基づいて上位k銘柄のみを選択
+    uni = uni.head(k).reset_index(drop=True)
     uni["liquidity_rank"] = np.arange(1, len(uni)+1)
     uni["asof"] = asof
 

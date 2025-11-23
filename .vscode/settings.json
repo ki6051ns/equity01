@@ -1,12 +1,10 @@
 {
-  "jupyter.defaultKernel": "equity01",
   "python.defaultInterpreterPath": "C:\\Users\\sohta\\AppData\\Local\\Programs\\Python\\Python38\\python.exe",
   "jupyter.kernels.filter": [],
   "jupyter.kernels.excludePythonEnvironments": [],
-  "jupyter.kernelSpec": {
-    "name": "equity01",
-    "display_name": "Python 3.8 (equity01)"
-  }
+  "notebook.defaultFormatter": "ms-python.python",
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+  "jupyter.askForKernelRestart": false
 }
 
 

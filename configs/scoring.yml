@@ -1,0 +1,35 @@
+# 3.1 銘柄スコアリング用 設定 v0.1
+
+asof: "latest"   # or "2025-11-07" のように日付指定も可
+
+universe:
+  path: "data/intermediate/universe/latest_universe.parquet"
+
+prices:
+  dir: "data/raw/prices"   # prices_{TICKER}.csv を想定（例: prices_7203.T.csv）
+
+features:
+  lookback_short: 5        # 短期モメンタム窓
+  lookback_mid: 20         # 中期モメンタム窓
+  vol_window: 20           # ボラティリティ算出窓
+  vol_floor: 1.0e-4        # 0割防止用の下限
+  adv_window: 20           # ADV（平均出来高）算出窓
+  heat_z_thresh: 2.0       # 過熱判定（短期リターンZの閾値）
+  illiq_pct_threshold: 0.2 # ADV下位何％を「低流動性」とみなすか
+
+scoring:
+  weight_mom_short: 0.4
+  weight_mom_mid:   0.4
+  weight_strength:  0.2
+  penalty_heat:     -0.3   # 過熱銘柄へのペナルティ
+  penalty_illiq:    -0.2   # 低流動性銘柄へのペナルティ
+  alpha: 1.0               # w_i ∝ (Score_i^+)^α
+  beta: 0.5                # / σ_i^β
+
+constraints:
+  max_weight_single: 0.05  # 1銘柄あたり上限（当面は緩めでOK）
+  min_weight_nonzero: 0.0  # 将来、極小ウェイト切り捨てに使う
+
+output:
+  dir: "data/intermediate/scoring"
+  filename_pattern: "{asof}_scores.parquet"

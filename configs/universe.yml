@@ -8,7 +8,7 @@ exclude_types: ["ETF", "REIT", "Preferred", "Warrant"]
 exclude_tickers: []
 
 inputs:
-  listings_csv: "data/raw/jpx_listings/20250930.csv"  # ← 固定スナップショット
+  listings_csv: "data/raw/jpx_listings/20251031.csv"  # ← 固定スナップショット
   prices_dir:   "data/raw/prices"
   source: "auto"
 
@@ -17,6 +17,7 @@ output:
   write_latest_symlink: true
   latest_name: "latest_universe.parquet"
 logs_dir: "logs"
+
 
 
 
