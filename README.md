@@ -1,157 +1,156 @@
-📘 AI駆動・日本株インテリジェント日次トレーディングシステム
-研究開発計画書 Ver.2.0（Markdown版）
-― モメンタム×クイックFA＋Breadth PCA＋HMM＋EventGuard＋Intraweek＋Leverage ―
-0. 開発体制と位置付け（Ver.2.0で新設）
-0.1 開発スタック
+# AI駆動・日本株インテリジェント日次トレーディングシステム  
+## 研究開発計画書 **Ver.2.0**  
+### ― モメンタム × クイックFA × Breadth PCA × HMM × EventGuard × Intraweek × Leverage ―
 
-ChatGPT：設計・要件定義・体系化担当
+---
 
-Cursor（無料→有料検討）：実装補助・GitHub連携
+# 0. 開発体制・開発プロセス・現在位置
 
-Claude：コードレビュー・監査専任
+## 0.1 技術スタック
+- **ChatGPT**：要件定義・外部設計・レビュー生成・設計判断  
+- **Cursor（Pro推奨）**：実装・モジュール生成・GitHub連携  
+- **GitHub**：バージョン管理・コードレビュー  
+- **Claude**：コードレビュー（監査役ポジション）  
 
-VSCode / Jupyter：ローカル実行環境
+> ChatGPT = 設計  
+> Cursor = 実装  
+> Claude = レビュー  
+> GitHub = 変更管理  
 
-GPT ⇄ Cursor ⇄ GitHub ⇄ Claude の分業で開発コストを最小化する構造
+明確な役割分担により、誤実装・重複作業・レビュー抜けを防止する。
 
-0.2 開発フェーズ（現在位置）
-分析 → 要件定義 → 外部設計 → 内部設計 → ■コーディング（今ここ）
-       → コードレビュー → 単体テスト → 結合テスト → システムテスト → ベータ運用
+---
 
+## 0.2 現在の開発フェーズ（2025年11月）
+```
+分析 → 要件定義 → 外部設計 → 内部設計 →（今ここ：実装）→ コードレビュー → 単体テスト → 結合テスト → システムテスト → ベータ運用
+```
 
-equity01 = 日本株・日次・ロング軸の単体戦略
+- **設計フェーズ：完了済**
+- **実装フェーズ：進行（v1.4 → v1.5 → v1.6）**
+- この後：
+  - 単体テスト（戦略別ペーパートレード）
+  - 結合テスト（alphaers-papertrade）
+  - システムテスト
+  - ベータ運用
 
-将来、equity02／forex01／crypto01 と共に ALPHAERS（統合PF） へ接続する基礎ユニット
+---
 
-1. 背景と目的
+# 1. 目的
 
-現物×信用に AI のレイヤー（RegimeGuard, EventGuard, Post-Loss）を重ね、
-「踏まない・負けにくい・回復の早い」日本株アルゴを構築する。
+日本株・日次トレーディング（現物＋信用）において、  
+**再現性・説明可能性・堅牢性のある AI 駆動の戦略基盤を構築する。**
 
-目標：Sharpe ≥ 0.9、Calmar ≥ 0.6、OOS α（t>2）
+従来の「裁量」「高速」「イベント依存」型ではなく、  
+**モメンタム × レジーム × EventGuard × Intraweek の統合型システム**を構築する。
 
-毎日完結型（日次確定）
+---
 
-SLA・監査可能な実装
+# 2. 成功指標（KPI）
 
-2. 成功指標（KPI）
-区分	指標	目標値
-リターン	年率 ≥ 15〜20%	
-Sharpe	≥ 0.9	
-Calmar	≥ 0.6	
-テール	下位5%日損益 ≥ −0.5%	
-運用安定性	夜間SLA 100%×10営業日	
-EventGuard	遅延 ≤ 10分（最大30分）	
-レバ	VAR ≤ 2%	
-3. 戦略構成（ロジック全体）
+| 区分 | 指標 | 目標 |
+|---|---|---|
+| リターン | 年率リターン | **15〜20%** |
+| リスク調整 | Sharpe | **≥ 0.9** |
+| 安定性 | Calmar | **≥ 0.6** |
+| Tail Risk | 5%下位損益 | **≥ −0.5%** |
+| 運用安定性 | 夜間SLA | **100%（連続10営業日）** |
+| レバ管理 | 1日VAR | **≤ 2%** |
+| Guard遅延 | EventGuard | **平均≤10分（最大≤30分）** |
 
-以下は equity01 の全ロジックレイヤー。
-Ver.2.0 では 3.1 銘柄スコアリングまで実装済み。
+---
 
-3.1 銘柄スコアリング（Ver.2.0で実装完了）
-✔ ユニバース（実装済）
+# 3. 戦略構成（Ver.2.0）
 
-東証流動性上位20％
+## 3.1 銘柄スコアリング（完成度：40% → 実装中）
 
-universe_builder.py → YYYYMMDD_universe.parquet
+- **ユニバース**：東証流動性上位 20%（ver1.4 完成）
+- **特徴量**（ver1.6〜実装）
+  - ret_1 / ret_5 / ret_20
+  - vol_20
+  - ADV
+  - 出来高加速
+  - Quick-FA（EPS改定・ROIC）
+- **スコア合成**
+  \[
+  Score_i = f(MOM, VOL, ADV, FA) - Penalty(overheat,\ spread)
+  \]
 
-✔ 価格データ（実装済）
+- **配分式**
+  \[
+  w_i \propto rac{(Score_i^+)^lpha}{\sigma_i^eta}
+  \]
+  α=1.0、β=0.5
 
-download_prices.py
+---
 
-yfinance / Stooq fallback
+## 3.2 β制御（ETF階段＋現物連続近似）
 
-JST 換算 & MultiIndex 正規化
+- β目標：0.6 / 0.4 / 0.2  
+- 階段調整（ETF単元発注）  
+- 逸脱時の βRetune ロジック搭載
 
-✔ 特徴量（実装済）
+---
 
-ret_1 / ret_5 / ret_20
+## 3.3 レジーム判定（重要：**equity01 から切り出し**）
 
-vol_20
+Ver2.0 での大きな変更：
 
-Zスコア
+> **レジーム判定を equity01 内で完成させない。**  
+> **ALPHAERS（統合ストラテジー側）に切り出す。**
 
-ADV
+理由：
+- レジームは **全ストラテジーの上位概念**のため、個別戦略に置くと整合性が壊れる  
+- 現時点では **neutral 固定**で単体性能の検証を優先  
+- equity01 の内部ロジックは保持しつつ、外部公開しない  
 
-strength / heat_flag
+---
 
-✔ スコア合成（実装済）
-w_i ∝ (Score_i^+)^α / σ_i^β
-(α=1, β=0.5)
+## 3.4 EventGuard（反射層）
 
-✔ Top10 出力（実行済）
+- 先物 5分 −1%
+- USDJPY +1.5σ
+- VIX +10%
+- BOJ/FOMC などイベント重要度 ≥4  
+- 作動 → 新規停止／β=0.2／引けクローズ  
+- 継続 5営業日
 
-run_scoring.py → Top10銘柄（penalized score順）
+---
 
-3.2 β制御（ETF階段＋現物補間）
+## 3.5 Intraweek Overlay
 
-※ 設計完了・実装前
+- 月→木：可  
+- 木→金：要判定  
+- 金→月：禁止（完全クローズ）  
 
-β目標：0.6 / 0.4 / 0.2
+週内の β：0.5 / 0.35 / 0.2
 
-ETF：単元ごとに階段
+---
 
-現物：未満株で連続補間
+## 3.6 Multi-Horizon Ensemble
 
-|Δβ| > 0.1 → β Retune
+- 日次（D） × 週内（IW）
+- EventGuard = ON → γ=0.8  
+- 乖離 <0.3 → IW 縮小
 
-3.3 レジーム判定（思考層）
-✔ モデル
+---
 
-Breadth PCA
+## 3.7 Leverage Control
 
-Sticky-HMM
+- レバ：2〜3倍（原資ベース）
+- βcap = 0.9  
+- VAR ≤ 2%  
+- Event週：1.0×上限  
 
-BOCPD
+---
 
-Rule-Logit
+# 4. データ・コード構成（Ver2.0）
 
-❗ Ver.2.0の重大方針（明確化）
-
-レジーム判定ロジックは equity01 から切り出し、
-ALPHAERS（統括PF側）の “グローバルレジームエンジン” へまとめて統合する。
-
-理由
-
-戦略ごとに個別レジームを持つと 整合性が壊れる
-
-マルチストラテジー統合時に β・EventGuard・パリティが衝突
-
-equity01 のみのローカル判定は後工程の 混線リスクが大きい
-
-レジームは「全体の最終仕上げ」レイヤーであり、戦略単体では扱わない方が正しい
-
-運用方針（Ver.2.0）
-
-equity01 は neutral 固定
-
-β制御はミニマム版
-
-EventGuard だけは（局所防御）例外で搭載可能
-
-3.4 EventGuard（反射層）
-
-※ 設計完了・実装は β制御後
-
-3.5 GMI（米株 → 日株）
-
-※ 設計完了・実装前
-
-3.6 Post-Loss Learning
-3.7 Score–Beta Adaptive
-3.8 NF×PR Ensemble
-3.9 Intraweek Overlay
-3.10 Multi-Horizon Ensemble
-3.11 Leverage Control
-
-※ すべて 設計完了 / 実装前
-
-4. データ／システム構成
+```
 equity01/
-├─ configs/
 ├─ data/
 │   ├─ raw/
-│   ├─ intermediate/universe/
+│   ├─ intermediate/
 │   ├─ processed/
 │   └─ calendar/
 ├─ features/
@@ -159,111 +158,59 @@ equity01/
 ├─ exec/
 ├─ research/
 └─ scripts/
+```
 
+**Ver2.0 の追加点：**
+- universe_builder（v1.4）→ 安定
+- prices_downloader → 実装完了
+- scoring_engine → v1.0 稼働
+- scoring_validation.ipynb → 作動確認
 
-Ver.2.0 現在：DataLoader／Universe／Scoring が完成し、下層が完全稼働。
+---
 
-5. 検証（Ver.2.0明文化）
-5.1 カットオフ政策の検証（必須）
+# 5. テストと品質保証（QA）
 
-08:00 JST 統一カットオフの妥当性
+> **テストのクリア要件 = “説明できること”**
 
-D-1補正との比較
+必須条件：
 
-DM統計・Sharpe差分で最適化
+1. **なぜその投資判断になったか説明できる**  
+2. **勝因・敗因を因果構造で説明できる**  
+3. **市場環境との整合性が取れている**  
+4. **説明できない挙動は改良対象**
 
-5.2 比較モデル
+---
 
-逆ボラ
+# 6. 開発スケジュール（改訂版）
 
-EW
+| Phase | 内容 | 期間 |
+|---|---|---|
+| **P1** | feature_builder（ret/vol/adv） | 〜 11/20 |
+| **P2** | scoring_engine v1.1（penalty強化） | 〜 11/27 |
+| **P3** | EventGuard v1.0 | 〜 12/10 |
+| **P4** | Intraweek v1.0 | 〜 12/20 |
+| **P5** | 単体テスト（10営業日） | 1月 |
+| **P6** | 統合テスト（alphaers-papertrade） | 2〜3月 |
+| **P7** | ベータ運用 | 4月〜 |
 
-最小分散
+---
 
-MOM系多数
+# 7. 成果物
 
-βヘッジ
+- universe snapshots  
+- scores_YYYYMMDD.parquet  
+- feature matrices  
+- orders_YYYYMMDD.csv  
+- audit logs  
+- 設計書一式  
 
-Overnight / IW
+---
 
-5.3 テスト＝説明可能性の検証（重要）
+# 8. 結論（Ver2.0）
 
-テストが 合格となる条件：
+- **ユニバース構築（v1.4）とスコアリング基盤（v1.6）が安定稼働**  
+- **レジーム判定は equity01 から切り出し、ALPHAERS 内で統合管理へ**  
+- **今後は feature layer → scoring layer の精緻化に集中するフェーズ**
 
-市場環境・イベントを踏まえ 判断理由を説明できる
-
-勝因・敗因を言語化 できる
-
-説明と結果が 整合
-
-説明不能は 改良対象（先送り禁止）
-
-説明できるまでが単体テストの完了条件
-— レジーム統合以前の最重要QA項目。
-
-6. 開発プロセスと ALPHAERS との接続
-6.1 equity01 = 単体テスト
-
-ペーパートレードは equity01 ローカルの単体テスト
-
-ロジック破綻・データ破綻の確認
-
-説明可能性の担保
-
-6.2 ALPHAERS = 結合テスト／システムテスト
-
-全ストラテジー（equity, forex, crypto etc.）の相関・β・EventGuardを統合
-
-レジーム判定は ALPHAERS 側で一元管理
-
-パリティ配置も ALPHAERS が担当
-
-equity01 の β制御だけ独立稼働 → 最終的に統合予定
-
-6.3 ベータ運用（2026 Q1〜）
-
-手動運転＋準自動（RPA）
-
-SLA・監査ログを構築
-
-Event／β逸脱／Post-Loss対応を定期検証
-
-7. 開発スケジュール
-Phase	内容	状態
-P1	DataLoader / Universe	完了
-P2	Feature & Scoring	完了
-P3	β制御・cutoff_policy	これから
-P4	EventGuard / GMI	設計済
-P5	IW / Multi-Horizon	設計済
-P6	Leverage / Post-Loss	後続
-P7	PoC ペーパー運用	2026
-P8	Fat-Trim	2026
-8. 成果物
-
-Python ソース一式
-
-universe parquet
-
-prices csv
-
-scores parquet（予定）
-
-orders.csv / audit
-
-PoC 報告書
-
-運用手順書
-
-9. 結論
-
-EventGuard × RegimeGuard × Post-Loss × Ensemble × IW × Leverage
-により、「踏まない・負けにくい・回復の早い」日本株アルゴが成立する。
-
-Ver.2.0 の到達点：
-
-データ基盤 → ユニバース → スコアリング
-までを正式に実装完了。
-
-これにより β制御・EventGuard 以降の “戦略ロジック中核フェーズ” に進める状態となった。
-
-レジーム判定は equity01 から切り出し、ALPHAERS に統合する方針を確定。
+> **equity01 Ver2.0 = 戦略単体の“形”が完成した段階**  
+> 次フェーズは「精度」と「説明力」を高める局面に入る。
