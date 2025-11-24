@@ -104,46 +104,40 @@ def build_feature_matrix(
         zcol = f"z_{col}"
         df[zcol] = _cross_sectional_zscore(df, col, config.group_col)
 
-    # --- 2. 流動性ペナルティ (低 ADV にペナルティ) ---
-    if config.liquidity_adv_col not in df.columns:
-        raise KeyError(f"必要なカラムがありません: {config.liquidity_adv_col}")
+    # ---- Zスコアのクリップ（±3σ） ----
+    z_cols = ["z_ret_5d", "z_ret_20d", "z_vol_20d", "z_adv_20d"]
+    for c in z_cols:
+        if c in df.columns:
+            # 日次クロスセクションで ±3σ にクリップ（極端値で暴れないように）
+            df[c] = df.groupby("date")[c].transform(lambda s: s.clip(-3.0, 3.0))
 
-    # 日付ごとに ADV のパーセンタイル閾値を計算
-    def _liq_threshold(x: pd.Series) -> float:
-        return x.quantile(config.low_liq_quantile)
-
-    thresh_series = df.groupby(config.group_col)[config.liquidity_adv_col].transform(
-        _liq_threshold
+    # --- 2. 流動性ペナルティ (ADVの下位20%) ---
+    # 日次クロスセクションで下位20%を "低流動性" とみなす
+    adv_q = df.groupby("date")["adv_20d"].transform(
+        lambda s: s.quantile(0.2)
     )
+    df["pen_liquidity"] = 0.0
+    df.loc[df["adv_20d"] < adv_q, "pen_liquidity"] = -0.5
 
-    df["pen_liquidity"] = np.where(
-        df[config.liquidity_adv_col] <= thresh_series,
-        config.low_liq_penalty,
-        0.0,
+    # --- 3. ボラペナルティ (VOLの上位20%) ---
+    vol_q = df.groupby("date")["vol_20d"].transform(
+        lambda s: s.quantile(0.8)
     )
+    df["pen_vol"] = 0.0
+    df.loc[df["vol_20d"] > vol_q, "pen_vol"] = -0.5
 
-    # --- 3. 高ボラペナルティ (z_vol_20d が高い銘柄にペナルティ) ---
-    z_vol_col = "z_vol_20d"
-    if z_vol_col not in df.columns:
-        raise KeyError(f"必要なカラムがありません: {z_vol_col}（Z 化済みか確認してください）")
-
-    df["pen_vol"] = np.where(
-        df[z_vol_col] >= config.high_vol_z_threshold,
-        config.high_vol_penalty,
-        0.0,
-    )
-
-    # --- 4. 総ペナルティ ---
+    # --- 4. トータルペナルティ ---
     df["penalty_total"] = df["pen_liquidity"] + df["pen_vol"]
+    df["penalty_total"] = df["penalty_total"].clip(-1.0, 0.0)
 
-    # --- 5. ペナルティ前の "素" のスコア計算 ---
-    feature_raw = 0.0
-    for zcol, w in config.weights.items():
-        if zcol not in df.columns:
-            raise KeyError(f"weights で指定された Z カラムが存在しません: {zcol}")
-        feature_raw = feature_raw + w * df[zcol]
+    # --- 5. モメンタム合成 (v1.1) ---
+    w_short = 0.6   # 5日リターン Z の重み
+    w_medium = 0.4  # 20日リターン Z の重み
 
-    df["feature_raw"] = feature_raw
+    df["feature_raw"] = (
+        w_short * df["z_ret_5d"]
+        + w_medium * df["z_ret_20d"]
+    )
 
     # --- 6. ペナルティを反映した最終スコア ---
     df["feature_score"] = df["feature_raw"] + df["penalty_total"]

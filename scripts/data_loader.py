@@ -13,6 +13,7 @@ DataLoader: 日本株/為替/VIX/先物のローカル↔取得↔保存（安�
 """
 from __future__ import annotations
 
+import ast
 import io
 import time
 import typing as t
@@ -338,32 +339,87 @@ class DataLoader:
 
 def load_prices() -> pd.DataFrame:
     """
-    build_features から呼ばれる用。
-    必ず columns に
-    ['date', 'open', 'high', 'low', 'close', 'adj_close', 'volume', 'turnover']
-    のどれか一部 or 全部を含む DataFrame を返す。
+    日本株の価格データ（複数銘柄対応）。
+    期待する raw ディレクトリ構成:
+      data/raw/equities/*.parquet
+
+    各ファイルは日足:
+      date, open, high, low, close, adj_close(任意), volume(任意), turnover(任意)
+
+    ファイル名の stem を symbol として使う想定。
+    例: data/raw/equities/7203.T.parquet -> symbol='7203.T'
     """
-    # DataLoader を使って価格データを取得
-    dl = DataLoader(data_dir="data/raw", tz="Asia/Tokyo")
-    
-    # 例：7203.T（トヨタ）のデータを取得
-    # 複数銘柄対応時は、ここでループして結合する
-    try:
-        df = dl.load_stock_data("7203.T")
-    except Exception as e:
-        # 取得に失敗した場合は、保存済みのCSV/Parquetを読み込む
-        csv_path = Path("data/raw/prices/prices_7203.T.csv")
-        if csv_path.exists():
-            df = pd.read_csv(csv_path)
-            df[DATE_COL] = pd.to_datetime(df[DATE_COL])
+    base = Path("data/raw/equities")
+    files = sorted(list(base.glob("*.parquet")))
+
+    if not files:
+        # フォールバック：従来の単一銘柄版（あなたの旧実装）をここに残しておいてもOK
+        raise FileNotFoundError(
+            f"no parquet files found under {base}. "
+            "例: data/raw/equities/7203.T.parquet のように配置してください。"
+        )
+
+    frames = []
+    for f in files:
+        df = pd.read_parquet(f)
+
+        # ★ カラム名フラット化：MultiIndex や "('open','2413.T')" → "open" にする
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [c[0] for c in df.columns]
         else:
-            raise RuntimeError(f"価格データの取得に失敗しました: {e}")
-    
-    # デバッグ用：今何が返っているか確認
-    print("load_prices() columns:", df.columns.tolist())
-    print(df.head())
-    
-    return df
+            new_cols = []
+            for c in df.columns:
+                # タプルの場合: ('open', '2413.T') → 'open'
+                if isinstance(c, tuple):
+                    new_cols.append(c[0])
+                # 文字列にタプルが埋まっている場合: "('open', '2413.T')" → 'open'
+                elif isinstance(c, str) and c.startswith("(") and "," in c:
+                    try:
+                        t = ast.literal_eval(c)
+                        if isinstance(t, tuple):
+                            new_cols.append(t[0])
+                        else:
+                            new_cols.append(c)
+                    except Exception:
+                        new_cols.append(c)
+                else:
+                    new_cols.append(c)
+            df.columns = new_cols
+
+        # 重複列（symbol が二重など）は後ろを優先して1つに
+        df = df.loc[:, ~df.columns.duplicated()]
+
+        # symbol 列が無ければファイル名から付ける
+        if "symbol" not in df.columns:
+            symbol = f.stem  # 例: 7203.T
+            df = df.copy()
+            df["symbol"] = symbol
+
+        # ★ この後に今までの必須列チェックを続ける
+        required_price_cols = ["date", "open", "high", "low", "close"]
+        missing = [c for c in required_price_cols if c not in df.columns]
+        if missing:
+            raise KeyError(f"{f}: 必須列 {missing} がありません。columns={df.columns.tolist()}")
+
+        # adj_close が無ければ close を流用
+        if "adj_close" not in df.columns:
+            df["adj_close"] = df["close"]
+
+        # turnover が無ければ None のままでOK（build_features 側で再計算しているので任意）
+        if "turnover" not in df.columns:
+            df["turnover"] = None
+
+        df["date"] = pd.to_datetime(df["date"])
+        frames.append(df[["date", "symbol", "open", "high", "low", "close", "adj_close", "volume", "turnover"]])
+
+    prices = pd.concat(frames, ignore_index=True)
+    prices = prices.sort_values(["symbol", "date"]).reset_index(drop=True)
+
+    print("load_prices() columns:", list(prices.columns))
+    print("symbols:", prices["symbol"].unique()[:10], "… (n=", prices["symbol"].nunique(), ")")
+    print(prices.head())
+
+    return prices
 
 
 def main():

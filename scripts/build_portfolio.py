@@ -28,7 +28,11 @@ def main():
     macro = pd.read_csv(macro_path) if macro_path.exists() else pd.DataFrame()
     vix = pd.read_parquet(vix_path) if vix_path.exists() else pd.DataFrame()
 
-    guard_cfg = EventGuardConfig()
+    guard_cfg = EventGuardConfig(
+        date_col="date",  # build_daily_portfolio の出力は "date" カラム
+        symbol_col="symbol",
+        weight_col="weight",
+    )
     df_port_guarded = apply_event_guard(
         df_port,
         guard_cfg,
