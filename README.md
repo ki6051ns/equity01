@@ -1,216 +1,125 @@
-# AI駆動・日本株インテリジェント日次トレーディングシステム  
-## 研究開発計画書 **Ver.2.0**  
-### ― モメンタム × クイックFA × Breadth PCA × HMM × EventGuard × Intraweek × Leverage ―
+# equity01: AI駆動・日本株インテリジェント日次トレーディングシステム
+
+本リポジトリは **AI駆動・日本株インテリジェント日次トレーディングシステム（equity01）** の  
+研究・開発・実装を行うプロジェクトです。
+
+本 README は Ver2.1 の進捗に基づき更新されています。
 
 ---
 
-# 0. 開発体制・開発プロセス・現在位置
+## 🚀 プロジェクト概要
 
-## 0.1 技術スタック
-- **ChatGPT**：要件定義・外部設計・レビュー生成・設計判断  
-- **Cursor（Pro推奨）**：実装・モジュール生成・GitHub連携  
-- **GitHub**：バージョン管理・コードレビュー  
-- **Claude**：コードレビュー（監査役ポジション）  
+equity01 は以下を満たす「再現性・説明可能性・堅牢性のある日本株日次トレード」基盤を構築することを目的とします。
 
-> ChatGPT = 設計  
-> Cursor = 実装  
-> Claude = レビュー  
-> GitHub = 変更管理  
+- モメンタム × クイックFA  
+- Breadth PCA（市場広さ）  
+- HMM（レジーム判定）  
+- EventGuard（イベント防御）  
+- Intraweek（週内ロジック）  
+- β制御（ETFで近似）  
+- Leverage 管理
 
-明確な役割分担により、誤実装・重複作業・レビュー抜けを防止する。
-
----
-
-## 0.2 現在の開発フェーズ（2025年11月）
-```
-分析 → 要件定義 → 外部設計 → 内部設計 →（今ここ：実装）→ コードレビュー → 単体テスト → 結合テスト → システムテスト → ベータ運用
-```
-
-- **設計フェーズ：完了済**
-- **実装フェーズ：進行（v1.4 → v1.5 → v1.6）**
-- この後：
-  - 単体テスト（戦略別ペーパートレード）
-  - 結合テスト（alphaers-papertrade）
-  - システムテスト
-  - ベータ運用
+最終的には **ALPHAERS（統合戦略）** のコンポーネントとして組み込まれます。
 
 ---
 
-# 1. 目的
-
-日本株・日次トレーディング（現物＋信用）において、  
-**再現性・説明可能性・堅牢性のある AI 駆動の戦略基盤を構築する。**
-
-従来の「裁量」「高速」「イベント依存」型ではなく、  
-**モメンタム × レジーム × EventGuard × Intraweek の統合型システム**を構築する。
-
----
-
-# 2. 成功指標（KPI）
-
-| 区分 | 指標 | 目標 |
-|---|---|---|
-| リターン | 年率リターン | **15〜20%** |
-| リスク調整 | Sharpe | **≥ 0.9** |
-| 安定性 | Calmar | **≥ 0.6** |
-| Tail Risk | 5%下位損益 | **≥ −0.5%** |
-| 運用安定性 | 夜間SLA | **100%（連続10営業日）** |
-| レバ管理 | 1日VAR | **≤ 2%** |
-| Guard遅延 | EventGuard | **平均≤10分（最大≤30分）** |
-
----
-
-# 3. 戦略構成（Ver.2.0）
-
-## 3.1 銘柄スコアリング（完成度：40% → 実装中）
-
-- **ユニバース**：東証流動性上位 20%（ver1.4 完成）
-- **特徴量**（ver1.6〜実装）
-  - ret_1 / ret_5 / ret_20
-  - vol_20
-  - ADV
-  - 出来高加速
-  - Quick-FA（EPS改定・ROIC）
-- **スコア合成**
-  \[
-  Score_i = f(MOM, VOL, ADV, FA) - Penalty(overheat,\ spread)
-  \]
-
-- **配分式**
-  \[
-  w_i \propto rac{(Score_i^+)^lpha}{\sigma_i^eta}
-  \]
-  α=1.0、β=0.5
-
----
-
-## 3.2 β制御（ETF階段＋現物連続近似）
-
-- β目標：0.6 / 0.4 / 0.2  
-- 階段調整（ETF単元発注）  
-- 逸脱時の βRetune ロジック搭載
-
----
-
-## 3.3 レジーム判定（重要：**equity01 から切り出し**）
-
-Ver2.0 での大きな変更：
-
-> **レジーム判定を equity01 内で完成させない。**  
-> **ALPHAERS（統合ストラテジー側）に切り出す。**
-
-理由：
-- レジームは **全ストラテジーの上位概念**のため、個別戦略に置くと整合性が壊れる  
-- 現時点では **neutral 固定**で単体性能の検証を優先  
-- equity01 の内部ロジックは保持しつつ、外部公開しない  
-
----
-
-## 3.4 EventGuard（反射層）
-
-- 先物 5分 −1%
-- USDJPY +1.5σ
-- VIX +10%
-- BOJ/FOMC などイベント重要度 ≥4  
-- 作動 → 新規停止／β=0.2／引けクローズ  
-- 継続 5営業日
-
----
-
-## 3.5 Intraweek Overlay
-
-- 月→木：可  
-- 木→金：要判定  
-- 金→月：禁止（完全クローズ）  
-
-週内の β：0.5 / 0.35 / 0.2
-
----
-
-## 3.6 Multi-Horizon Ensemble
-
-- 日次（D） × 週内（IW）
-- EventGuard = ON → γ=0.8  
-- 乖離 <0.3 → IW 縮小
-
----
-
-## 3.7 Leverage Control
-
-- レバ：2〜3倍（原資ベース）
-- βcap = 0.9  
-- VAR ≤ 2%  
-- Event週：1.0×上限  
-
----
-
-# 4. データ・コード構成（Ver2.0）
+## 🧱 アーキテクチャ
 
 ```
 equity01/
 ├─ data/
-│   ├─ raw/
-│   ├─ intermediate/
-│   ├─ processed/
+│   ├─ raw/              # 94銘柄のparquetデータ
+│   ├─ processed/        # 特徴量・スコア・ポートフォリオ
 │   └─ calendar/
-├─ features/
-├─ models/
-├─ exec/
-├─ research/
-└─ scripts/
+├─ scripts/              # 各種データ処理・戦略実行
+├─ features/             # feature builder modules
+├─ models/               # モデル類（今後拡張）
+├─ research/             # notebooks
+└─ exec/                 # 実行系
 ```
 
-**Ver2.0 の追加点：**
-- universe_builder（v1.4）→ 安定
-- prices_downloader → 実装完了
-- scoring_engine → v1.0 稼働
-- scoring_validation.ipynb → 作動確認
+---
+
+## 🧪 現状の実装状況（2025/11 Ver2.1）
+
+### 完成
+- ✔ ユニバース（流動性上位20% → 94銘柄）
+- ✔ parquet 価格データ基盤
+- ✔ Feature Builder（ret / vol / ADV / Z-score）
+- ✔ Scoring Engine v1.1
+- ✔ EventGuard v0.2（決算フラグ＋soft guard）
+- ✔ 単体ペーパートレード（スコア → PF → リターン）
+- ✔ cutoff_policy（D-1 08:00 JST）
+
+### 進行中
+- ⏳ EventGuard v0.3（先物急変、VIX、為替）
+- ⏳ Intraweek Overlay（週内ポジションの縮小/禁止）
+- ⏳ β制御（ETF階段方式）
+- ⏳ Multi-Horizon Ensemble
+
+### 今後
+- 🔜 ALPHAERS による統合ペーパートレード
+- 🔜 ベータ運用（2026 Q2 目標）
 
 ---
 
-# 5. テストと品質保証（QA）
+## 📂 実行コマンド例
 
-> **テストのクリア要件 = “説明できること”**
+特徴量生成 → スコア生成 → PF構築 → ペーパートレード
 
-必須条件：
-
-1. **なぜその投資判断になったか説明できる**  
-2. **勝因・敗因を因果構造で説明できる**  
-3. **市場環境との整合性が取れている**  
-4. **説明できない挙動は改良対象**
-
----
-
-# 6. 開発スケジュール（改訂版）
-
-| Phase | 内容 | 期間 |
-|---|---|---|
-| **P1** | feature_builder（ret/vol/adv） | 〜 11/20 |
-| **P2** | scoring_engine v1.1（penalty強化） | 〜 11/27 |
-| **P3** | EventGuard v1.0 | 〜 12/10 |
-| **P4** | Intraweek v1.0 | 〜 12/20 |
-| **P5** | 単体テスト（10営業日） | 1月 |
-| **P6** | 統合テスト（alphaers-papertrade） | 2〜3月 |
-| **P7** | ベータ運用 | 4月〜 |
+```bash
+python scripts/build_features.py
+python scripts/build_portfolio.py
+python scripts/paper_trade.py
+```
 
 ---
 
-# 7. 成果物
+## 📈 ペーパートレード結果（サマリ）
 
-- universe snapshots  
-- scores_YYYYMMDD.parquet  
-- feature matrices  
-- orders_YYYYMMDD.csv  
-- audit logs  
-- 設計書一式  
+（例：94銘柄ユニバース）
+
+- 年率: 13.5%
+- Sharpe: 0.70
+- 最大DD: -36%
+- EventGuard オン状態で安定動作を確認
 
 ---
 
-# 8. 結論（Ver2.0）
+## 🛡 EventGuard（v0.2）
 
-- **ユニバース構築（v1.4）とスコアリング基盤（v1.6）が安定稼働**  
-- **レジーム判定は equity01 から切り出し、ALPHAERS 内で統合管理へ**  
-- **今後は feature layer → scoring layer の精緻化に集中するフェーズ**
+実装済：
 
-> **equity01 Ver2.0 = 戦略単体の“形”が完成した段階**  
-> 次フェーズは「精度」と「説明力」を高める局面に入る。
+- earnings_flag（決算イベント）
+- guard_factor（soft guard）
+- decision_date / trading_date 2軸ロジック
+
+v0.3（開発中）：
+
+- 先物5分変動チェック（-1%）
+- USDJPY ±σ
+- VIX +10%
+- BOJ/FOMCスコア ≥4
+
+---
+
+## 🧠 技術スタック
+
+- **ChatGPT**：要件定義・外部/内部設計
+- **Cursor Pro**：コーディング・リファクタリング
+- **Claude**：コード監査
+- **GitHub**：バージョン管理
+
+---
+
+## 📜 ライセンス
+
+（必要に応じて記載）
+
+---
+
+## 📮 連絡先
+
+本プロジェクトは個人研究目的です。  
+外部公開・issue対応・PR 受付は必要に応じて設定します。
+
