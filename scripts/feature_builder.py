@@ -1,141 +1,151 @@
-# scripts/feature_builder.py
-# 3.1 銘柄スコアリング用のシンプルな特徴量生成 v0.1
+"""
+feature_builder.py
 
-import os
-from pathlib import Path
+[役割]
+- ret / vol / adv を日次クロスセクションで Z 化
+- 流動性・ボラティリティに基づく penalty を付与
+- 総合スコア (feature_score) を計算して返す
+
+[前提となる入力カラム例]
+- date   : 日付 (datetime or string)
+- symbol : 銘柄コード / ティッカー
+- ret_5d : 5営業日リターン
+- ret_20d: 20営業日リターン
+- vol_20d: 20営業日リターンの標準偏差（スケールは任意）
+- adv_20d: 20営業日平均売買代金
+"""
+
+from dataclasses import dataclass, field
 from typing import List, Dict
-
 import numpy as np
 import pandas as pd
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _load_price_csv(ticker: str, prices_dir: Path) -> pd.DataFrame:
+@dataclass
+class FeatureBuilderConfig:
     """
-    data/raw/prices/prices_{ticker}.csv を想定したローダー。
-    date, open, high, low, close, adj_close, volume, turnover 形式。
+    feature_builder のパラメータ設定
     """
-    path = prices_dir / ("prices_%s.csv" % ticker)
-    if not path.exists():
-        print("[feature_builder] price file not found, skip:", path)
-        return pd.DataFrame()
+    # Z-score を計算する元カラム
+    zscore_cols: List[str] = field(
+        default_factory=lambda: ["ret_5d", "ret_20d", "vol_20d", "adv_20d"]
+    )
 
-    df = pd.read_csv(path)
-    if "date" not in df.columns:
-        raise ValueError("price csv must have 'date' column: %s" % path)
+    # Z-score を線形結合するときの重み
+    # キーは「z_元カラム名」
+    weights: Dict[str, float] = field(
+        default_factory=lambda: {
+            "z_ret_5d": 0.4,
+            "z_ret_20d": 0.6,
+            "z_vol_20d": -0.2,
+            "z_adv_20d": 0.1,
+        }
+    )
 
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date").reset_index(drop=True)
-    df["ticker"] = ticker
-    return df
+    # penalty 関連
+    liquidity_adv_col: str = "adv_20d"    # 流動性判定に使う ADV カラム
+    low_liq_quantile: float = 0.1         # 下位何％を低流動性とみなすか
+    low_liq_penalty: float = -1.0         # 低流動性ペナルティ
+
+    high_vol_z_threshold: float = 2.0     # z_vol がこの値を超えたら高ボラ判定
+    high_vol_penalty: float = -0.5        # 高ボラティリティペナルティ
+
+    group_col: str = "date"               # クロスセクション計算単位
+    symbol_col: str = "symbol"            # 銘柄識別
 
 
-def build_features_for_universe(
-    tickers: List[str],
-    asof: str,
-    cfg: Dict,
+def _cross_sectional_zscore(
+    df: pd.DataFrame, col: str, group_col: str
+) -> pd.Series:
+    """
+    クロスセクション Z-score を計算するユーティリティ関数
+    """
+    def _z(x: pd.Series) -> pd.Series:
+        if x.std(ddof=0) == 0:
+            # すべて同じ値の場合は 0 に揃える
+            return pd.Series(0.0, index=x.index)
+        return (x - x.mean()) / x.std(ddof=0)
+
+    return df.groupby(group_col)[col].transform(_z)
+
+
+def build_feature_matrix(
+    df: pd.DataFrame, config: FeatureBuilderConfig
 ) -> pd.DataFrame:
     """
-    ユニバース銘柄について、3.1で必要な最低限の特徴量を返す。
+    メイン関数：
+    - Z-score 付与
+    - penalty 付与
+    - 総合スコア feature_score 計算
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        入力データ（長い形式: date, symbol が行方向に並ぶ）
+    config : FeatureBuilderConfig
+        設定
 
     Returns
     -------
-    df : pd.DataFrame
-        index: MultiIndex(date, ticker)
-        columns:
-            ['close', 'volume',
-             'ret_1', 'ret_5', 'ret_20',
-             'ret_5_z', 'ret_20_z',
-             'adv_20', 'vol_20',
-             'strength', 'heat_flag']
+    pd.DataFrame
+        入力 df に以下を付与したもの:
+        - z_* カラム
+        - pen_liquidity, pen_vol, penalty_total
+        - feature_raw (ペナルティ前のスコア)
+        - feature_score (ペナルティ適用後スコア)
     """
-    prices_dir = PROJECT_ROOT / cfg["prices"]["dir"]
+    df = df.copy()
 
-    lookback_short = int(cfg["features"]["lookback_short"])
-    lookback_mid = int(cfg["features"]["lookback_mid"])
-    adv_window = int(cfg["features"]["adv_window"])
-    vol_window = int(cfg["features"]["vol_window"])
-    heat_z_thresh = float(cfg["features"]["heat_z_thresh"])
+    # --- 1. Z-score の計算 ---
+    for col in config.zscore_cols:
+        if col not in df.columns:
+            raise KeyError(f"必要なカラムがありません: {col}")
 
-    lookback = max(lookback_mid, adv_window, vol_window) + 5  # 余裕を持たせる
+        zcol = f"z_{col}"
+        df[zcol] = _cross_sectional_zscore(df, col, config.group_col)
 
-    frames = []
-    for ticker in tickers:
-        df = _load_price_csv(ticker, prices_dir)
-        if df.empty:
-            continue
+    # --- 2. 流動性ペナルティ (低 ADV にペナルティ) ---
+    if config.liquidity_adv_col not in df.columns:
+        raise KeyError(f"必要なカラムがありません: {config.liquidity_adv_col}")
 
-        # asof 以前だけに制限
-        if asof != "latest":
-            cutoff = pd.to_datetime(asof)
-            df = df[df["date"] <= cutoff]
+    # 日付ごとに ADV のパーセンタイル閾値を計算
+    def _liq_threshold(x: pd.Series) -> float:
+        return x.quantile(config.low_liq_quantile)
 
-        # 直近 lookback 行だけ残す
-        if len(df) > lookback:
-            df = df.iloc[-lookback:]
-
-        frames.append(df)
-
-    if not frames:
-        raise RuntimeError("no price data loaded. check prices_dir and tickers.")
-
-    px = pd.concat(frames, ignore_index=True)
-    px = px.sort_values(["ticker", "date"]).reset_index(drop=True)
-
-    # --- dtype 強制変換 ---
-    px["close"] = pd.to_numeric(px["close"], errors="coerce")
-    px["open"] = pd.to_numeric(px["open"], errors="coerce")
-    px["high"] = pd.to_numeric(px["high"], errors="coerce")
-    px["low"] = pd.to_numeric(px["low"], errors="coerce")
-    px["volume"] = pd.to_numeric(px["volume"], errors="coerce")
-    if "turnover" in px.columns:
-        px["turnover"] = pd.to_numeric(px["turnover"], errors="coerce")
-
-    # NaN行を削除（closeがNaNの行を削除）
-    px = px.dropna(subset=["close"])
-
-    # 基本列
-    px = px.set_index(["date", "ticker"])
-    if "close" not in px.columns or "volume" not in px.columns:
-        raise ValueError("price data must have 'close' and 'volume' columns.")
-
-    # リターン
-    px["ret_1"] = px.groupby("ticker")["close"].pct_change()
-    px["ret_5"] = px.groupby("ticker")["close"].pct_change(5)
-    px["ret_20"] = px.groupby("ticker")["close"].pct_change(20)
-
-    # Zスコア（銘柄内）
-    def _z(x: pd.Series) -> pd.Series:
-        m = x.mean()
-        s = x.std(ddof=1)
-        return (x - m) / (s + 1e-8)
-
-    px["ret_5_z"] = px.groupby("ticker")["ret_5"].transform(_z)
-    px["ret_20_z"] = px.groupby("ticker")["ret_20"].transform(_z)
-
-    # ADV, ボラ
-    px["adv_20"] = (
-        px.groupby("ticker")["volume"]
-        .transform(lambda x: x.rolling(adv_window).mean())
+    thresh_series = df.groupby(config.group_col)[config.liquidity_adv_col].transform(
+        _liq_threshold
     )
 
-    px["vol_20"] = (
-        px.groupby("ticker")["ret_1"]
-        .transform(lambda x: x.rolling(vol_window).std())
+    df["pen_liquidity"] = np.where(
+        df[config.liquidity_adv_col] <= thresh_series,
+        config.low_liq_penalty,
+        0.0,
     )
 
-    # 強さ指標（単純に「銘柄ret_20 − 全銘柄平均ret_20」）
-    mkt_ret_20 = px.groupby("date")["ret_20"].mean()
-    px = px.reset_index().merge(
-        mkt_ret_20.reset_index().rename(columns={"ret_20": "mkt_ret_20"}),
-        on="date",
-        how="left"
-    ).set_index(["date", "ticker"])
-    px["strength"] = px["ret_20"] - px["mkt_ret_20"]
+    # --- 3. 高ボラペナルティ (z_vol_20d が高い銘柄にペナルティ) ---
+    z_vol_col = "z_vol_20d"
+    if z_vol_col not in df.columns:
+        raise KeyError(f"必要なカラムがありません: {z_vol_col}（Z 化済みか確認してください）")
 
-    # 過熱フラグ
-    px["heat_flag"] = (px["ret_5_z"].abs() > heat_z_thresh).astype(int)
+    df["pen_vol"] = np.where(
+        df[z_vol_col] >= config.high_vol_z_threshold,
+        config.high_vol_penalty,
+        0.0,
+    )
 
-    return px
+    # --- 4. 総ペナルティ ---
+    df["penalty_total"] = df["pen_liquidity"] + df["pen_vol"]
+
+    # --- 5. ペナルティ前の "素" のスコア計算 ---
+    feature_raw = 0.0
+    for zcol, w in config.weights.items():
+        if zcol not in df.columns:
+            raise KeyError(f"weights で指定された Z カラムが存在しません: {zcol}")
+        feature_raw = feature_raw + w * df[zcol]
+
+    df["feature_raw"] = feature_raw
+
+    # --- 6. ペナルティを反映した最終スコア ---
+    df["feature_score"] = df["feature_raw"] + df["penalty_total"]
+
+    return df

@@ -336,6 +336,36 @@ class DataLoader:
         return s
 
 
+def load_prices() -> pd.DataFrame:
+    """
+    build_features から呼ばれる用。
+    必ず columns に
+    ['date', 'open', 'high', 'low', 'close', 'adj_close', 'volume', 'turnover']
+    のどれか一部 or 全部を含む DataFrame を返す。
+    """
+    # DataLoader を使って価格データを取得
+    dl = DataLoader(data_dir="data/raw", tz="Asia/Tokyo")
+    
+    # 例：7203.T（トヨタ）のデータを取得
+    # 複数銘柄対応時は、ここでループして結合する
+    try:
+        df = dl.load_stock_data("7203.T")
+    except Exception as e:
+        # 取得に失敗した場合は、保存済みのCSV/Parquetを読み込む
+        csv_path = Path("data/raw/prices/prices_7203.T.csv")
+        if csv_path.exists():
+            df = pd.read_csv(csv_path)
+            df[DATE_COL] = pd.to_datetime(df[DATE_COL])
+        else:
+            raise RuntimeError(f"価格データの取得に失敗しました: {e}")
+    
+    # デバッグ用：今何が返っているか確認
+    print("load_prices() columns:", df.columns.tolist())
+    print(df.head())
+    
+    return df
+
+
 def main():
     dl = DataLoader(data_dir="data/raw", tz="Asia/Tokyo")
     # 例1：株価

@@ -1,144 +1,216 @@
-# scripts/scoring_engine.py
-# 3.1 銘柄スコアリング＆ウェイト計算 v0.1
+"""
+scoring_engine.py
 
-from pathlib import Path
-from typing import Dict, List
-import sys
+役割：
+- feature_builder で作った feature_score を元に
+  - Large / Mid / Small の size bucket を付与
+  - bucket 内で Z-score を取り直し
+  - 各 bucket から均等に銘柄をピック
+  - 日次のポートフォリオ候補テーブルを返す
+"""
 
+from dataclasses import dataclass, field
+from typing import List, Literal, Optional
 import numpy as np
 import pandas as pd
-import yaml
 
-# プロジェクトルートをパスに追加
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from scripts.feature_builder import build_features_for_universe
+SizeBucket = Literal["Large", "Mid", "Small"]
 
 
-def _load_config(path: Path) -> Dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+@dataclass
+class ScoringEngineConfig:
+    # bucket を格納するカラム名
+    size_bucket_col: str = "size_bucket"
 
+    # 流動性の代理指標（なければ market_cap などに差し替え）
+    liquidity_col: str = "adv_20d"
 
-def _load_universe_tickers(universe_path: Path) -> List[str]:
-    df = pd.read_parquet(universe_path)
-    if "ticker" not in df.columns:
-        raise ValueError("universe parquet must have 'ticker' column.")
-    return df["ticker"].unique().tolist()
+    # 1日あたりの最大保有銘柄数（全体）
+    max_names_per_day: int = 30
 
-
-def compute_scores(asof: str, cfg: Dict) -> pd.DataFrame:
-    """
-    asof 時点での Score_i, weight_i を計算して返す。
-
-    Returns
-    -------
-    scores : pd.DataFrame
-        index: ticker
-        columns: ['score_raw', 'score_penalized',
-                  'sigma', 'weight']
-    """
-    universe_path = PROJECT_ROOT / cfg["universe"]["path"]
-    tickers = _load_universe_tickers(universe_path)
-
-    feats = build_features_for_universe(tickers, asof, cfg)
-
-    # 各銘柄の直近行（asof 指定ならその日、それ以外は最後の行）
-    df = feats.reset_index()
-    if asof != "latest":
-        asof_dt = pd.to_datetime(asof)
-        df = df[df["date"] <= asof_dt]
-
-    # 各 ticker の最終行を使用
-    df = (
-        df.sort_values(["ticker", "date"])
-          .groupby("ticker")
-          .tail(1)
-          .set_index("ticker")
+    # Large / Mid / Small の比率（合計1になるように）
+    size_bucket_weights: dict = field(
+        default_factory=lambda: {
+            "Large": 1 / 3,
+            "Mid": 1 / 3,
+            "Small": 1 / 3,
+        }
     )
 
-    sc_cfg = cfg["scoring"]
-    ft_cfg = cfg["features"]
+    # bucket 内で銘柄を選ぶ際の最小スコア閾値
+    min_score_threshold: float = -np.inf  # とりあえず制約なし
 
-    # ベーススコア
-    score_raw = (
-        sc_cfg["weight_mom_short"] * df["ret_5_z"] +
-        sc_cfg["weight_mom_mid"]   * df["ret_20_z"] +
-        sc_cfg["weight_strength"]  * df["strength"]
+    # 最終的に weight をどう計算するか
+    # "equal": 同一重み, "score": feature_score 比例
+    weighting_scheme: Literal["equal", "score"] = "equal"
+
+    # 日次グルーピングに使うカラム
+    date_col: str = "date"
+
+    # スコアカラム名
+    score_col: str = "feature_score"
+
+
+def _cross_sectional_zscore(df: pd.DataFrame, col: str, group_cols: List[str]) -> pd.Series:
+    """
+    group_cols（例: [date, size_bucket]）単位で Z-score を計算
+    """
+    def _z(x: pd.Series) -> pd.Series:
+        if x.std(ddof=0) == 0:
+            return pd.Series(0.0, index=x.index)
+        return (x - x.mean()) / x.std(ddof=0)
+
+    return df.groupby(group_cols)[col].transform(_z)
+
+
+def assign_size_bucket(
+    df: pd.DataFrame,
+    config: ScoringEngineConfig,
+) -> pd.DataFrame:
+    """
+    adv_20d のクロスセクションから Large / Mid / Small を機械的に付与。
+    ※ 将来的には market_cap ベースに差し替え前提。
+    """
+    df = df.copy()
+
+    if config.liquidity_col not in df.columns:
+        raise KeyError(f"{config.liquidity_col} がありません。columns={df.columns.tolist()}")
+
+    # 日付ごとに 3分位で区切る
+    def _bucket_for_day(x: pd.Series) -> pd.Series:
+        # NaN は一旦 Mid 扱い
+        if x.notna().sum() < 3:
+            return pd.Series(["Mid"] * len(x), index=x.index)
+
+        q1 = x.quantile(1 / 3)
+        q2 = x.quantile(2 / 3)
+
+        bucket = pd.Series(index=x.index, dtype="object")
+        bucket[x >= q2] = "Large"
+        bucket[(x >= q1) & (x < q2)] = "Mid"
+        bucket[x < q1] = "Small"
+        bucket = bucket.fillna("Mid")
+
+        return bucket
+
+    df[config.size_bucket_col] = (
+        df.groupby(config.date_col)[config.liquidity_col]
+        .transform(_bucket_for_day)
     )
 
-    # ペナルティ
-    penalty = 0.0
-
-    # 過熱ペナルティ
-    if "heat_flag" in df.columns:
-        penalty = penalty + sc_cfg["penalty_heat"] * df["heat_flag"]
-
-    # 低流動性ペナルティ（ADV 下位 illiq_pct_threshold）
-    if "adv_20" in df.columns:
-        adv_rank = df["adv_20"].rank(pct=True)
-        thr = float(ft_cfg["illiq_pct_threshold"])
-        low_liq = (adv_rank < thr).astype(float)
-        penalty = penalty + sc_cfg["penalty_illiq"] * low_liq
-
-    score_penalized = score_raw + penalty
-
-    # σ_i（ボラ）
-    sigma = df["vol_20"].copy()
-    sigma = sigma.fillna(0.0)
-    vol_floor = float(ft_cfg["vol_floor"])
-    sigma = sigma.clip(lower=vol_floor)
-
-    alpha = float(sc_cfg["alpha"])
-    beta = float(sc_cfg["beta"])
-
-    score_pos = score_penalized.clip(lower=0.0)
-    raw_w = (score_pos ** alpha) / (sigma ** beta)
-
-    # 全体正規化
-    if raw_w.sum() > 0:
-        weight = raw_w / raw_w.sum()
-    else:
-        weight = raw_w.copy()  # 全ゼロ
-
-    # 単一銘柄上限
-    max_w = float(cfg["constraints"]["max_weight_single"])
-    if max_w > 0:
-        weight = weight.clip(upper=max_w)
-        if weight.sum() > 0:
-            weight = weight / weight.sum()
-
-    out = pd.DataFrame({
-        "score_raw": score_raw,
-        "score_penalized": score_penalized,
-        "sigma": sigma,
-        "weight": weight,
-    })
-
-    # スコア順に並べる
-    out = out.sort_values("score_penalized", ascending=False)
-
-    return out
+    return df
 
 
-def run_from_config(config_path: Path) -> pd.DataFrame:
-    cfg = _load_config(config_path)
-    asof = cfg.get("asof", "latest")
-    scores = compute_scores(asof, cfg)
+def build_daily_portfolio(
+    df_features: pd.DataFrame,
+    config: Optional[ScoringEngineConfig] = None,
+) -> pd.DataFrame:
+    """
+    入力:
+        df_features: feature_builder 出力 DataFrame
+            必須カラム: date, symbol, feature_score, adv_20d など
 
-    # 保存
-    out_dir = PROJECT_ROOT / cfg["output"]["dir"]
-    out_dir.mkdir(parents=True, exist_ok=True)
+    出力:
+        daily_portfolio DataFrame:
+            date, symbol, size_bucket, feature_score, z_score_bucket, weight, selected
+    """
+    if config is None:
+        config = ScoringEngineConfig()
 
-    asof_str = asof
-    if asof_str == "latest":
-        # 実際の asof 日付は scores.index から拾うほど厳密でなくてOK。
-        asof_str = "latest"
+    required_cols = [
+        config.date_col,
+        "symbol",
+        config.score_col,
+        config.liquidity_col,
+    ]
 
-    pattern = cfg["output"].get("filename_pattern", "{asof}_scores.parquet")
-    fname = pattern.format(asof=asof_str)
-    out_path = out_dir / fname
-    scores.to_parquet(out_path)
+    for c in required_cols:
+        if c not in df_features.columns:
+            raise KeyError(f"必須カラム {c} がありません。columns={df_features.columns.tolist()}")
 
-    return scores
+    df = df_features.copy()
+
+    # 1. size bucket を付与（まだ無ければ）
+    if config.size_bucket_col not in df.columns:
+        df = assign_size_bucket(df, config)
+
+    # 2. bucket 内 Z-score
+    df["z_score_bucket"] = _cross_sectional_zscore(
+        df,
+        config.score_col,
+        [config.date_col, config.size_bucket_col],
+    )
+
+    # 3. 日次 & bucket ごとの上位銘柄選定
+    #    → まずは target 数を算出
+    def _select_for_day(day_df: pd.DataFrame) -> pd.DataFrame:
+        day_df = day_df.copy()
+
+        n_total = config.max_names_per_day
+
+        per_bucket_target = {
+            bucket: max(int(n_total * w), 1)
+            for bucket, w in config.size_bucket_weights.items()
+        }
+
+        day_df["selected"] = False
+
+        # 各 bucket ごとに上位を選定
+        for bucket, n_target in per_bucket_target.items():
+            mask_bucket = day_df[config.size_bucket_col] == bucket
+            tmp = day_df[mask_bucket]
+
+            if tmp.empty:
+                continue
+
+            # 閾値でフィルタ
+            tmp = tmp[tmp[config.score_col] >= config.min_score_threshold]
+
+            if tmp.empty:
+                continue
+
+            tmp = tmp.sort_values(config.score_col, ascending=False).head(n_target)
+
+            day_df.loc[tmp.index, "selected"] = True
+
+        # 4. weight 計算
+        sel = day_df[day_df["selected"]]
+
+        if sel.empty:
+            day_df["weight"] = 0.0
+            return day_df
+
+        if config.weighting_scheme == "equal":
+            w = 1.0 / len(sel)
+            day_df["weight"] = np.where(day_df["selected"], w, 0.0)
+        elif config.weighting_scheme == "score":
+            scores = sel[config.score_col].clip(lower=0)
+            if scores.sum() == 0:
+                w = 1.0 / len(sel)
+                day_df["weight"] = np.where(day_df["selected"], w, 0.0)
+            else:
+                w_series = scores / scores.sum()
+                day_df["weight"] = 0.0
+                day_df.loc[sel.index, "weight"] = w_series
+        else:
+            raise ValueError(f"未知の weighting_scheme: {config.weighting_scheme}")
+
+        return day_df
+
+    df = df.groupby(config.date_col, group_keys=False).apply(_select_for_day)
+
+    # 出力カラムを整理
+    out_cols = [
+        config.date_col,
+        "symbol",
+        config.size_bucket_col,
+        config.score_col,
+        "z_score_bucket",
+        "selected",
+        "weight",
+    ]
+
+    # 存在するものだけ返す
+    out_cols = [c for c in out_cols if c in df.columns]
+
+    return df[out_cols].sort_values([config.date_col, config.size_bucket_col, config.score_col], ascending=[True, True, False])
