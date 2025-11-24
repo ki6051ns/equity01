@@ -1,0 +1,101 @@
+# equity01 進捗報告書（6th_commit ＋ 7th_commit）
+
+## 1. 概要（2025/11/24 時点）
+
+本報告書は **6th_commit と 7th_commit** の内容を統合した進捗サマリです。
+
+---
+
+## 2. 6th_commit の成果（EventGuard v0.1）
+
+### ✔ EventGuard v0.1 実装
+- earnings / macro / holiday 等のフラグ列を DataFrame に追加する前提で構築。
+- v0.1 は **仕様反映（スケルトン）＋ガード係数の枠組み作成** を主目的として実施。
+- earnings フラグが未整備のため、`flag_earnings` が無い場合でも安全に動作できるよう fail‑safe を導入。
+
+### ✔ Portfolio Builder の構造拡張
+- `size_bucket`, `guard_factor` を portfolio DF に追加できる構造へ変更。
+- event_guard → portfolio → paper_trade の **フロー全体が初めて一貫して動作**。
+
+---
+
+## 3. 7th_commit の成果（全ユニバース対応 ＋ 安定稼働）
+
+### ✔ 94銘柄（流動性上位20%）の parquet 変換完了
+- MultiIndex 問題（(“open”, “2413.T”) など）をすべて解決。
+- `date, symbol, open, high, low, close, adj_close, volume, turnover` の正規列に統一。
+
+### ✔ Feature Builder 全銘柄対応
+- 229,054 行の特徴量作成に成功。
+- `feature_score` の統計も正常（mean ≈ -0.21, max=3, min=-4）。
+
+### ✔ Portfolio Builder の正常稼働
+- EventGuard を通過した daily_portfolio を parquet 出力。
+- guard_factor=1.0 の正常ケースで安定動作。
+
+### ✔ Paper Trade（シングルストラテジー）動作確認
+- 94銘柄 × 2015–2025 → 2444 日の backtest 完走。
+- 日次 equity が再現可能になり、以下を取得：
+
+  ```
+  ann_return: 0.1358  
+  ann_vol:    0.1921  
+  sharpe:     0.7069  
+  max_dd:    -0.3662
+  ```
+
+---
+
+## 4. 進捗の定量評価
+
+### 📌 データパイプライン
+| フェーズ | 状況 |
+|---------|------|
+| price loader | ✔ 全銘柄正常化 |
+| feature builder | ✔ 229k 行生成 |
+| scoring（3.1） | ✔ 稼働中 |
+| event guard v0.1 | ✔ 組み込み完了 |
+| portfolio builder | ✔ フル動作 |
+| paper trade | ✔ 完走（94銘柄） |
+
+### 📌 信頼性向上ポイント
+- MultiIndex → flat column 化により、安定性が劇的に改善。
+- parquet ベースの I/O が高速で、研究コストが最適化。
+
+---
+
+## 5. 次の工程（8th_commit 以降）
+
+### 🔥 EventGuard v0.2（本命）
+- earnings, macro, holiday を **現実データ** と接続。
+- guard_factor の動的計算ロジック（±0.0〜±1.0）。
+
+### 🔥 レジーム判定（3.2 β制御）
+- ETF/Index Loader 接続  
+- β exposure を毎日算出  
+- β neutral / β controlled モードの切替
+
+### 🔥 QA（説明可能性）フレームの導入
+- 「なぜ勝ったか」「なぜその銘柄を選んだか」のログ生成
+- ロジック改善ループを formalize
+
+---
+
+## 6. 所感
+
+6th〜7th_commit により、**equity01 のコアパイプラインがほぼ完成**しました。
+
+特に：
+- parquet 正規化
+- event guard の枠組み完成
+- 全ユニバース対応
+- paper trade シングル戦略の完走
+
+は **実運用レベルの地盤固め** と言える成果です。
+
+これで次はついに **β制御（レジーム判定）→ EventGuard v0.2 → マルチストラテジー接続**  
+という “戦略としての完成フェーズ” に進める状態となりました。
+
+---
+
+Prepared by **equity01 project / Strategy Core Layer Report – 6th & 7th commit**
