@@ -9,38 +9,64 @@ import numpy as np
 import pandas as pd
 
 import data_loader  # 既存の load_prices を利用
-
+STARTDATE = "2025-10-31"
 
 @dataclass
 class PaperTradeConfig:
+    # build_portfolio.py の出力（EventGuard 適用後）
     portfolio_path: Path = Path("data/processed/daily_portfolio_guarded.parquet")
 
-    date_col: str = "date"
+    # ポートフォリオ側のカラム名
+    portfolio_date_col: str = "trading_date"  # 実際にポジションが有効になる日
     symbol_col: str = "symbol"
     weight_col: str = "weight"
+    guard_factor_col: Optional[str] = "guard_factor"
+    selected_col: Optional[str] = "selected"
+
+    # プライス側（load_prices）のカラム名
+    price_date_col: str = "date"
 
     # 年間営業日数（日本株想定）
     trading_days_per_year: int = 252
 
-    # リスクフリーはとりあえず 0 とする
+    # リスクフリー（とりあえず 0）
     risk_free_rate: float = 0.0
+
+    # ペーパートレードとして集計する開始日（この日以降のみ Results に残す）
+    # None にすると全期間を対象にする
+    paper_trade_start_date: Optional[str] = STARTDATE
 
 
 def prepare_forward_returns(cfg: PaperTradeConfig) -> pd.DataFrame:
     """
-    prices から「翌日リターン」を作成する。
-    ret_fwd_1d: 当日 close → 翌営業日 close の単純リターン
+    prices から「翌日リターン（CLOSE→CLOSE）」を作成する。
+    ret_fwd_1d: 当日 close → 翌営業日 close の単純リターン（t 時点にアライン）
     """
     prices = data_loader.load_prices().copy()
 
-    # カラム確認＆整形
-    if cfg.date_col not in prices.columns:
-        raise KeyError(f"'date' 列が必要です: {prices.columns.tolist()}")
+    # ログ用の軽い表示（挙動確認）
+    print("load_prices() columns:", list(prices.columns))
+    if cfg.symbol_col in prices.columns:
+        syms = prices[cfg.symbol_col].unique()
+        if len(syms) > 0:
+            head_syms = " ".join(syms[:10])
+            print(f"symbols: {head_syms} … (n= {len(syms)} )")
+    print(
+        prices[
+            [c for c in [cfg.price_date_col, cfg.symbol_col, "open", "high", "low", "close", "adj_close", "volume"]
+             if c in prices.columns]
+        ].head()
+    )
+
+    # カラム存在チェック
+    if cfg.price_date_col not in prices.columns:
+        raise KeyError(f"{cfg.price_date_col!r} 列が必要です: {prices.columns.tolist()}")
 
     if cfg.symbol_col not in prices.columns:
-        # 単一銘柄の場合のフォールバック
+        # 万一 symbol_col が無い場合は単一銘柄としてフォールバック
         prices[cfg.symbol_col] = "SINGLE"
 
+    # close 列が無ければ adj_close などから補完を試みる
     if "close" not in prices.columns:
         for cand in ["adj_close", "Adj Close", "Adj_Close", "ADJ_CLOSE"]:
             if cand in prices.columns:
@@ -50,114 +76,138 @@ def prepare_forward_returns(cfg: PaperTradeConfig) -> pd.DataFrame:
     if "close" not in prices.columns:
         raise KeyError(f"'close' 列が必要です: {prices.columns.tolist()}")
 
-    prices[cfg.date_col] = pd.to_datetime(prices[cfg.date_col])
-    prices = prices.sort_values([cfg.symbol_col, cfg.date_col])
+    prices[cfg.price_date_col] = pd.to_datetime(prices[cfg.price_date_col])
+    prices = prices.sort_values([cfg.symbol_col, cfg.price_date_col])
 
-    # 翌日リターン（forward 1d return）
-    # ret_fwd_1d[t] = close[t+1] / close[t] - 1
-    def _fwd_ret(x: pd.Series) -> pd.Series:
-        return x.shift(-1) / x - 1.0
+    # 翌日リターン（forward 1d return, CLOSE→CLOSE）
+    prices["ret_fwd_1d"] = (
+        prices.groupby(cfg.symbol_col)["close"]
+        .pct_change()
+        .shift(-1)
+    )
 
-    prices["ret_fwd_1d"] = prices.groupby(cfg.symbol_col)["close"].transform(_fwd_ret)
-
-    return prices[[cfg.date_col, cfg.symbol_col, "ret_fwd_1d"]]
+    return prices[[cfg.price_date_col, cfg.symbol_col, "ret_fwd_1d"]]
 
 
 def run_paper_trade(cfg: PaperTradeConfig) -> Tuple[pd.DataFrame, dict]:
     """
-    daily_portfolio と価格からペーパートレードを実行。
-    戻り値:
-      - df_daily: 日次の pnl / 累積カーブなど
-      - summary: サマリ指標（dict）
+    daily_portfolio_guarded.parquet（guard 適用済みポートフォリオ）と
+    forward 1日リターンを突き合わせ、日次の PnL / 指標を算出する。
     """
     # 1. ポートフォリオ読み込み
-    df_port = pd.read_parquet(cfg.portfolio_path).copy()
-    df_port[cfg.date_col] = pd.to_datetime(df_port[cfg.date_col])
+    df_port = pd.read_parquet(cfg.portfolio_path)
 
-    # weight が無ければ equal weight を仮定
-    if cfg.weight_col not in df_port.columns:
-        # 同一日の selected=True で均等割り
-        df_port["selected"] = df_port.get("selected", True)
+    # 日付カラムの解決（デフォルトは trading_date、無ければ date をフォールバック）
+    if cfg.portfolio_date_col not in df_port.columns:
+        if "trading_date" in df_port.columns:
+            portfolio_date_col = "trading_date"
+        elif "date" in df_port.columns:
+            portfolio_date_col = "date"
+        else:
+            raise KeyError(
+                f"ポートフォリオ側に {cfg.portfolio_date_col!r} も 'trading_date' も 'date' もありません: {df_port.columns.tolist()}"
+            )
+    else:
+        portfolio_date_col = cfg.portfolio_date_col
 
-        def _assign_equal_w(g: pd.DataFrame) -> pd.DataFrame:
-            g = g.copy()
-            sel = g["selected"]
-            n = sel.sum()
-            if n > 0:
-                w = 1.0 / n
-                g.loc[sel, cfg.weight_col] = w
-                g.loc[~sel, cfg.weight_col] = 0.0
-            else:
-                g[cfg.weight_col] = 0.0
-            return g
+    df_port[portfolio_date_col] = pd.to_datetime(df_port[portfolio_date_col])
 
-        df_port = df_port.groupby(cfg.date_col, group_keys=False).apply(_assign_equal_w)
+    # selected があれば True のものだけに絞る
+    if cfg.selected_col and cfg.selected_col in df_port.columns:
+        before = len(df_port)
+        df_port = df_port[df_port[cfg.selected_col]]
+        print(f"selected フィルタ: {before} → {len(df_port)} rows")
 
-    # 2. 翌日リターンの準備
+    # guard_factor があれば weight に乗算
+    if cfg.guard_factor_col and cfg.guard_factor_col in df_port.columns:
+        df_port["_weight_eff"] = df_port[cfg.weight_col] * df_port[cfg.guard_factor_col]
+    else:
+        df_port["_weight_eff"] = df_port[cfg.weight_col]
+
+    # 2. forward リターン作成
     df_ret = prepare_forward_returns(cfg)
+    df_ret[cfg.price_date_col] = pd.to_datetime(df_ret[cfg.price_date_col])
 
-    # 3. マージ（同一日・同一銘柄で join）
+    # 3. マージ（portfolio_date と price_date を突き合わせ）
     df_merged = df_port.merge(
-        df_ret,
-        on=[cfg.date_col, cfg.symbol_col],
+        df_ret[[cfg.price_date_col, cfg.symbol_col, "ret_fwd_1d"]],
+        left_on=[portfolio_date_col, cfg.symbol_col],
+        right_on=[cfg.price_date_col, cfg.symbol_col],
         how="left",
+        suffixes=("", "_px"),
     )
 
-    # 最終日など、返り値が NaN の行は PnL計算から除外
+    # リターンが NaN の行は PnL 計算から除外（最終日など）
     df_merged = df_merged.dropna(subset=["ret_fwd_1d"])
 
     # 4. 銘柄別 PnL
-    df_merged["pnl"] = df_merged[cfg.weight_col] * df_merged["ret_fwd_1d"]
+    df_merged["pnl"] = df_merged["_weight_eff"] * df_merged["ret_fwd_1d"]
 
     # 5. 日次集計
     df_daily = (
         df_merged
-        .groupby(cfg.date_col)
+        .groupby(portfolio_date_col)
         .agg(
             daily_return=("pnl", "sum"),
-            gross_exposure=(cfg.weight_col, lambda x: x.abs().sum()),
-            n_names=("pnl", "count"),
+            gross_exposure=("_weight_eff", lambda x: x.abs().sum()),
+            n_names=(cfg.symbol_col, "nunique"),
         )
         .sort_index()
     )
 
-    # 累積リターン（equity curve）
+    # 6. ペーパートレード開始日でフィルタ（live 期間だけを記録）
+    if cfg.paper_trade_start_date:
+        start_ts = pd.to_datetime(cfg.paper_trade_start_date)
+        df_daily = df_daily.loc[df_daily.index >= start_ts]
+
+    # equity curve
     df_daily["equity"] = (1.0 + df_daily["daily_return"]).cumprod()
 
     # 最大ドローダウン
-    rolling_max = df_daily["equity"].cummax()
-    drawdown = df_daily["equity"] / rolling_max - 1.0
-    df_daily["drawdown"] = drawdown
-    max_dd = drawdown.min()
+    if not df_daily.empty:
+        rolling_max = df_daily["equity"].cummax()
+        drawdown = df_daily["equity"] / rolling_max - 1.0
+        df_daily["drawdown"] = drawdown
+        max_dd = drawdown.min()
+    else:
+        df_daily["drawdown"] = np.nan
+        max_dd = np.nan
 
     # サマリ指標
     ret_series = df_daily["daily_return"]
     mean_ret = ret_series.mean()
     vol = ret_series.std(ddof=0)
 
-    ann_ret = (1.0 + mean_ret) ** cfg.trading_days_per_year - 1.0 if not math.isnan(mean_ret) else np.nan
-    ann_vol = vol * math.sqrt(cfg.trading_days_per_year) if not math.isnan(vol) else np.nan
-    sharpe = (ann_ret - cfg.risk_free_rate) / ann_vol if ann_vol not in (0.0, np.nan) else np.nan
+    if df_daily.empty or math.isnan(mean_ret) or math.isnan(vol) or vol == 0.0:
+        ann_ret = np.nan
+        ann_vol = np.nan
+        sharpe = np.nan
+    else:
+        ann_ret = (1.0 + mean_ret) ** cfg.trading_days_per_year - 1.0
+        ann_vol = vol * math.sqrt(cfg.trading_days_per_year)
+        rf_daily = (1.0 + cfg.risk_free_rate) ** (1.0 / cfg.trading_days_per_year) - 1.0
+        sharpe = (mean_ret - rf_daily) / vol if vol != 0 else np.nan
 
     summary = {
-        "n_days": len(df_daily),
-        "ann_return": ann_ret,
-        "ann_vol": ann_vol,
-        "sharpe": sharpe,
-        "max_drawdown": max_dd,
-        "final_equity": df_daily["equity"].iloc[-1] if len(df_daily) > 0 else np.nan,
+        "n_days": int(df_daily.shape[0]),
+        "ann_return": float(ann_ret) if not (isinstance(ann_ret, float) and math.isnan(ann_ret)) else np.nan,
+        "ann_vol": float(ann_vol) if not (isinstance(ann_vol, float) and math.isnan(ann_vol)) else np.nan,
+        "sharpe": float(sharpe) if not (isinstance(sharpe, float) and math.isnan(sharpe)) else np.nan,
+        "max_drawdown": float(max_dd) if not (isinstance(max_dd, float) and math.isnan(max_dd)) else np.nan,
+        "final_equity": float(df_daily["equity"].iloc[-1]) if not df_daily.empty else np.nan,
     }
 
     return df_daily, summary
 
 
-def main():
+def main() -> None:
     cfg = PaperTradeConfig()
 
     df_daily, summary = run_paper_trade(cfg)
 
     out_path = Path("data/processed/paper_trade_daily.csv")
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # index（日付）付きで保存
     df_daily.to_csv(out_path)
 
     print("paper trade daily results saved to:", out_path)
@@ -170,4 +220,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
