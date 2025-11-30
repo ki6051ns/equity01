@@ -1,0 +1,4 @@
+date,event_type,subtype,country,hedge_ratio,hedge_days,comment
+2025-03-13,macro,fomc,US,0.5,1,FOMC statement
+2025-03-14,macro,boj,JP,0.5,2,BOJ meeting + governor presser
+2025-06-13,sq,major_sq,JP,0.5,1,メジャーSQ

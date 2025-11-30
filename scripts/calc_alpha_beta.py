@@ -55,6 +55,12 @@ def merge_portfolio_with_tpx(
 
     # ポートフォリオ C→C リターン（paper_trade の daily_return をそのまま採用）
     df["port_ret_cc"] = df["daily_return"]
+    
+    # 追加：α部分とヘッジ部分も別トラックで見る
+    if "daily_return_alpha" in df.columns:
+        df["port_ret_cc_alpha"] = df["daily_return_alpha"]
+    if "daily_return_hedge" in df.columns:
+        df["port_ret_cc_hedge"] = df["daily_return_hedge"]
 
     return df
 
@@ -71,8 +77,15 @@ def add_cumulative_and_relative_alpha(df: pd.DataFrame) -> Tuple[pd.DataFrame, f
     """
     df = df.copy()
 
+    # 累積リターン計算（total, alpha, hedge, TOPIX）
     df["cum_port"] = (1.0 + df["port_ret_cc"]).cumprod()
     df["cum_tpx"] = (1.0 + df["tpx_ret_cc"]).cumprod()
+    
+    # α部分とヘッジ部分の累積リターン
+    if "port_ret_cc_alpha" in df.columns:
+        df["cum_port_alpha"] = (1.0 + df["port_ret_cc_alpha"]).cumprod()
+    if "port_ret_cc_hedge" in df.columns:
+        df["cum_port_hedge"] = (1.0 + df["port_ret_cc_hedge"]).cumprod()
 
     # 日次の超過リターン
     df["rel_alpha_daily"] = df["port_ret_cc"] - df["tpx_ret_cc"]
@@ -107,12 +120,20 @@ def print_summary(df: pd.DataFrame, relative_alpha_total: float) -> None:
     print(f"  日次相対α    : {mu_rel:+.6f}")
 
     print("\n累積リターン（最終日）:")
-    print(f"  ポートフォリオ: {cum_port:.4f} ({(cum_port - 1.0)*100:+.2f}%)")
-    print(f"  TOPIX        : {cum_tpx:.4f} ({(cum_tpx  - 1.0)*100:+.2f}%)")
+    print(f"  ポートフォリオ（Total）: {cum_port:.4f} ({(cum_port - 1.0)*100:+.2f}%)")
+    print(f"  TOPIX                : {cum_tpx:.4f} ({(cum_tpx  - 1.0)*100:+.2f}%)")
     print(
-        f"  累積相対α    : {(relative_alpha_total)*100:+.2f}% "
+        f"  累積相対α            : {(relative_alpha_total)*100:+.2f}% "
         "(= Port累積 - TOPIX累積)"
     )
+    
+    # α部分とヘッジ部分の累積リターン
+    if "cum_port_alpha" in df.columns:
+        cum_alpha = df["cum_port_alpha"].iloc[-1]
+        print(f"  α部分（累積）        : {cum_alpha:.4f} ({(cum_alpha - 1.0)*100:+.2f}%)")
+    if "cum_port_hedge" in df.columns:
+        cum_hedge = df["cum_port_hedge"].iloc[-1]
+        print(f"  ヘッジ部分（累積）    : {cum_hedge:.4f} ({(cum_hedge - 1.0)*100:+.2f}%)")
 
 
 def main() -> None:
@@ -135,33 +156,31 @@ def main() -> None:
     df.to_parquet(out, index=False)
 
     print(f"\n相対α計算結果を保存しました: {out}")
+    # 表示用カラムを選択
+    display_cols = [
+        "trade_date",
+        "port_ret_cc",
+        "tpx_ret_cc",
+        "rel_alpha_daily",
+        "cum_port",
+        "cum_tpx",
+    ]
+    if "port_ret_cc_alpha" in df.columns:
+        display_cols.append("port_ret_cc_alpha")
+    if "port_ret_cc_hedge" in df.columns:
+        display_cols.append("port_ret_cc_hedge")
+    if "cum_port_alpha" in df.columns:
+        display_cols.append("cum_port_alpha")
+    if "cum_port_hedge" in df.columns:
+        display_cols.append("cum_port_hedge")
+    
+    display_cols = [c for c in display_cols if c in df.columns]
+    
     print("\n先頭5行:")
-    print(
-        df[
-            [
-                "trade_date",
-                "port_ret_cc",
-                "tpx_ret_cc",
-                "rel_alpha_daily",
-                "cum_port",
-                "cum_tpx",
-            ]
-        ].head()
-    )
-
+    print(df[display_cols].head())
+    
     print("\n末尾5行:")
-    print(
-        df[
-            [
-                "trade_date",
-                "port_ret_cc",
-                "tpx_ret_cc",
-                "rel_alpha_daily",
-                "cum_port",
-                "cum_tpx",
-            ]
-        ].tail()
-    )
+    print(df[display_cols].tail())
 
     # サマリ出力（β/OLS は完全に無視）
     print_summary(df, relative_alpha_total)

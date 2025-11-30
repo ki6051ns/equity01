@@ -1,6 +1,7 @@
 # scripts/paper_trade.py
 
 import math
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
@@ -9,7 +10,15 @@ import numpy as np
 import pandas as pd
 
 import data_loader  # 既存の load_prices を利用
+
+# プロジェクトルートをパスに追加（config を読むため）
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+import config  # type: ignore
+
 STARTDATE = "2025-10-31"
+
 
 @dataclass
 class PaperTradeConfig:
@@ -53,14 +62,28 @@ def prepare_forward_returns(cfg: PaperTradeConfig) -> pd.DataFrame:
             print(f"symbols: {head_syms} … (n= {len(syms)} )")
     print(
         prices[
-            [c for c in [cfg.price_date_col, cfg.symbol_col, "open", "high", "low", "close", "adj_close", "volume"]
-             if c in prices.columns]
+            [
+                c
+                for c in [
+                    cfg.price_date_col,
+                    cfg.symbol_col,
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "adj_close",
+                    "volume",
+                ]
+                if c in prices.columns
+            ]
         ].head()
     )
 
     # カラム存在チェック
     if cfg.price_date_col not in prices.columns:
-        raise KeyError(f"{cfg.price_date_col!r} 列が必要です: {prices.columns.tolist()}")
+        raise KeyError(
+            f"{cfg.price_date_col!r} 列が必要です: {prices.columns.tolist()}"
+        )
 
     if cfg.symbol_col not in prices.columns:
         # 万一 symbol_col が無い場合は単一銘柄としてフォールバック
@@ -81,9 +104,7 @@ def prepare_forward_returns(cfg: PaperTradeConfig) -> pd.DataFrame:
 
     # 翌日リターン（forward 1d return, CLOSE→CLOSE）
     prices["ret_fwd_1d"] = (
-        prices.groupby(cfg.symbol_col)["close"]
-        .pct_change()
-        .shift(-1)
+        prices.groupby(cfg.symbol_col)["close"].pct_change().shift(-1)
     )
 
     return prices[[cfg.price_date_col, cfg.symbol_col, "ret_fwd_1d"]]
@@ -92,7 +113,8 @@ def prepare_forward_returns(cfg: PaperTradeConfig) -> pd.DataFrame:
 def run_paper_trade(cfg: PaperTradeConfig) -> Tuple[pd.DataFrame, dict]:
     """
     daily_portfolio_guarded.parquet（guard 適用済みポートフォリオ）と
-    forward 1日リターンを突き合わせ、日次の PnL / 指標を算出する。
+    forward 1日リターンを突き合わせ、日次の Return / 指標を算出する。
+    PnL（実額）は内部計算のみで、出力には含めない。
     """
     # 1. ポートフォリオ読み込み
     df_port = pd.read_parquet(cfg.portfolio_path)
@@ -120,7 +142,9 @@ def run_paper_trade(cfg: PaperTradeConfig) -> Tuple[pd.DataFrame, dict]:
 
     # guard_factor があれば weight に乗算
     if cfg.guard_factor_col and cfg.guard_factor_col in df_port.columns:
-        df_port["_weight_eff"] = df_port[cfg.weight_col] * df_port[cfg.guard_factor_col]
+        df_port["_weight_eff"] = (
+            df_port[cfg.weight_col] * df_port[cfg.guard_factor_col]
+        )
     else:
         df_port["_weight_eff"] = df_port[cfg.weight_col]
 
@@ -140,30 +164,56 @@ def run_paper_trade(cfg: PaperTradeConfig) -> Tuple[pd.DataFrame, dict]:
     # リターンが NaN の行は PnL 計算から除外（最終日など）
     df_merged = df_merged.dropna(subset=["ret_fwd_1d"])
 
-    # 4. 銘柄別 PnL
+    # 4. 銘柄別 PnL とヘッジフラグ（PnLは内部のみ）
     df_merged["pnl"] = df_merged["_weight_eff"] * df_merged["ret_fwd_1d"]
+    INVERSE = config.INVERSE_HEDGE_SYMBOL
+    df_merged["is_hedge"] = df_merged[cfg.symbol_col] == INVERSE
 
-    # 5. 日次集計
-    df_daily = (
-        df_merged
-        .groupby(portfolio_date_col)
-        .agg(
-            daily_return=("pnl", "sum"),
-            gross_exposure=("_weight_eff", lambda x: x.abs().sum()),
-            n_names=(cfg.symbol_col, "nunique"),
-        )
-        .sort_index()
+    # 5. 日次集計（ヘッジ/非ヘッジで分けて集計）
+    # 5-1. ヘッジ/非ヘッジ別のPnL集計
+    agg_pnl = (
+        df_merged.groupby([portfolio_date_col, "is_hedge"])["pnl"]
+        .sum()
+        .unstack(fill_value=0.0)
     )
+
+    # 列名整理：False=α側, True=ヘッジ側
+    if False in agg_pnl.columns:
+        agg_pnl = agg_pnl.rename(columns={False: "alpha_pnl"})
+    else:
+        agg_pnl["alpha_pnl"] = 0.0
+
+    if True in agg_pnl.columns:
+        agg_pnl = agg_pnl.rename(columns={True: "hedge_pnl"})
+    else:
+        agg_pnl["hedge_pnl"] = 0.0
+
+    # その他の集計（gross_exposure / n_names は内部用。一応保持）
+    agg_other = df_merged.groupby(portfolio_date_col).agg(
+        gross_exposure=("_weight_eff", lambda x: x.abs().sum()),
+        n_names=(cfg.symbol_col, "nunique"),
+    )
+
+    # 5-2. マージ
+    df_daily = agg_pnl.join(agg_other, how="outer").fillna(0.0)
+    df_daily["total_pnl"] = df_daily["alpha_pnl"] + df_daily["hedge_pnl"]
+
+    # 5-3. NAVで割ってリターン化（初期元本を1.0とする）
+    nav0 = 1.0
+    df_daily["daily_return"] = df_daily["total_pnl"] / nav0
+    df_daily["daily_return_alpha"] = df_daily["alpha_pnl"] / nav0
+    df_daily["daily_return_hedge"] = df_daily["hedge_pnl"] / nav0
+
+    df_daily = df_daily.sort_index()
 
     # 6. ペーパートレード開始日でフィルタ（live 期間だけを記録）
     if cfg.paper_trade_start_date:
         start_ts = pd.to_datetime(cfg.paper_trade_start_date)
         df_daily = df_daily.loc[df_daily.index >= start_ts]
 
-    # equity curve
+    # 7. equity curve と drawdown（Returnベース）
     df_daily["equity"] = (1.0 + df_daily["daily_return"]).cumprod()
 
-    # 最大ドローダウン
     if not df_daily.empty:
         rolling_max = df_daily["equity"].cummax()
         drawdown = df_daily["equity"] / rolling_max - 1.0
@@ -173,7 +223,7 @@ def run_paper_trade(cfg: PaperTradeConfig) -> Tuple[pd.DataFrame, dict]:
         df_daily["drawdown"] = np.nan
         max_dd = np.nan
 
-    # サマリ指標
+    # 8. サマリ指標（Returnベース）
     ret_series = df_daily["daily_return"]
     mean_ret = ret_series.mean()
     vol = ret_series.std(ddof=0)
@@ -185,19 +235,42 @@ def run_paper_trade(cfg: PaperTradeConfig) -> Tuple[pd.DataFrame, dict]:
     else:
         ann_ret = (1.0 + mean_ret) ** cfg.trading_days_per_year - 1.0
         ann_vol = vol * math.sqrt(cfg.trading_days_per_year)
-        rf_daily = (1.0 + cfg.risk_free_rate) ** (1.0 / cfg.trading_days_per_year) - 1.0
+        rf_daily = (1.0 + cfg.risk_free_rate) ** (
+            1.0 / cfg.trading_days_per_year
+        ) - 1.0
         sharpe = (mean_ret - rf_daily) / vol if vol != 0 else np.nan
 
     summary = {
         "n_days": int(df_daily.shape[0]),
-        "ann_return": float(ann_ret) if not (isinstance(ann_ret, float) and math.isnan(ann_ret)) else np.nan,
-        "ann_vol": float(ann_vol) if not (isinstance(ann_vol, float) and math.isnan(ann_vol)) else np.nan,
-        "sharpe": float(sharpe) if not (isinstance(sharpe, float) and math.isnan(sharpe)) else np.nan,
-        "max_drawdown": float(max_dd) if not (isinstance(max_dd, float) and math.isnan(max_dd)) else np.nan,
-        "final_equity": float(df_daily["equity"].iloc[-1]) if not df_daily.empty else np.nan,
+        "ann_return": float(ann_ret)
+        if not (isinstance(ann_ret, float) and math.isnan(ann_ret))
+        else np.nan,
+        "ann_vol": float(ann_vol)
+        if not (isinstance(ann_vol, float) and math.isnan(ann_vol))
+        else np.nan,
+        "sharpe": float(sharpe)
+        if not (isinstance(sharpe, float) and math.isnan(sharpe))
+        else np.nan,
+        "max_drawdown": float(max_dd)
+        if not (isinstance(max_dd, float) and math.isnan(max_dd))
+        else np.nan,
+        "final_equity": float(df_daily["equity"].iloc[-1])
+        if not df_daily.empty
+        else np.nan,
     }
 
-    return df_daily, summary
+    # 9. 出力は Return 系だけに絞る
+    df_out = df_daily[
+        [
+            "daily_return",
+            "daily_return_alpha",
+            "daily_return_hedge",
+            "equity",
+            "drawdown",
+        ]
+    ].copy()
+
+    return df_out, summary
 
 
 def main() -> None:

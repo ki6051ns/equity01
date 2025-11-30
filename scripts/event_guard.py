@@ -1,195 +1,119 @@
-# scripts/event_guard.py
+# equity01/scripts/event_guard.py
+
+from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from datetime import date, timedelta
+from pathlib import Path
+from typing import Optional, Set
 
 import pandas as pd
+import sys
 
+# ---- プロジェクトルートをパスに追加 -----------------------------------
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+import config  # type: ignore
+
+
+# ---- 設定クラス ---------------------------------------------------------
 
 @dataclass
 class EventGuardConfig:
+    calendar_csv: str = config.EVENT_CALENDAR_CSV
+    earnings_csv: str = config.EARNINGS_CALENDAR_CSV
+    inverse_symbol: str = config.INVERSE_HEDGE_SYMBOL
+    default_hedge_ratio: float = config.DEFAULT_HEDGE_RATIO
+
+
+class EventGuard:
     """
-    EventGuard v0.2 設定クラス
-    """
-
-    # ポートフォリオDF側のカラム名
-    date_col: str = "trading_date"
-    symbol_col: str = "symbol"
-    weight_col: str = "weight"
-
-    # 決算カレンダー側
-    earnings_date_col: str = "date"
-    earnings_symbol_col: str = "symbol"
-    earnings_block: bool = True  # Trueなら決算日はその銘柄を0にする
-
-    # マクロイベント側
-    macro_date_col: str = "date"
-    macro_importance_col: str = "importance"   # 1〜3など
-    macro_block_importance: int = 3            # これ以上を「強イベント」とみなす
-    macro_risk_factor: float = 0.5             # 強イベント日は全銘柄に掛ける係数
-
-    # VIX側
-    vix_date_col: str = "date"
-    vix_value_col: str = "close"               # vix['close'] など
-    vix_risk_threshold: float = 25.0           # 中リスクのしきい値
-    vix_block_threshold: float = 35.0          # フルカットのしきい値
-    vix_risk_factor: float = 0.7               # 中リスク時に掛ける係数
-
-    # 出力カラム名
-    flag_earnings_col: str = "flag_earnings"
-    flag_macro_col: str = "flag_macro"
-    flag_vix_col: str = "flag_vix"
-    flag_vix_block_col: str = "flag_vix_block"
-    guard_factor_col: str = "guard_factor"
-    weight_raw_col: str = "weight_raw"
-
-
-def apply_event_guard(
-    df_port: pd.DataFrame,
-    config: EventGuardConfig,
-    earnings_calendar: Optional[pd.DataFrame] = None,
-    macro_calendar: Optional[pd.DataFrame] = None,
-    vix: Optional[pd.DataFrame] = None,
-) -> pd.DataFrame:
-    """
-    EventGuard v0.2 本体。
-    - 決算: 該当銘柄はその日の weight を 0 に
-    - マクロ: 強イベント日は全銘柄 weight に macro_risk_factor を掛ける
-    - VIX: しきい値に応じて weight をさらに絞る or 0 にする
-
-    ※ カレンダーDFが None / empty の場合は何もしない(=素通し)。
+    ・マクロ / SQ イベントに応じてヘッジ比率を返す
+    ・決算銘柄をユニバースから除外する
+    だけを担当する薄いラッパ。
     """
 
-    if df_port.empty:
-        return df_port
+    def __init__(self, cfg: Optional[EventGuardConfig] = None) -> None:
+        self.cfg = cfg or EventGuardConfig()
+        self._calendar = self._load_calendar(self.cfg.calendar_csv)
+        self._earnings = self._load_earnings(self.cfg.earnings_csv)
 
-    df = df_port.copy()
-    df[config.date_col] = pd.to_datetime(df[config.date_col])
+    # ---------------- 内部ロード処理 ------------------------------------
 
-    # --- 生ウェイトのバックアップ ---
-    if config.weight_raw_col not in df.columns:
-        df[config.weight_raw_col] = df[config.weight_col]
-
-    # --- フラグと guard_factor の初期化（ここが重要） ---
-    if config.flag_earnings_col not in df.columns:
-        df[config.flag_earnings_col] = False
-    if config.flag_macro_col not in df.columns:
-        df[config.flag_macro_col] = False
-    if config.flag_vix_col not in df.columns:
-        df[config.flag_vix_col] = False
-    if config.flag_vix_block_col not in df.columns:
-        df[config.flag_vix_block_col] = False
-    if config.guard_factor_col not in df.columns:
-        df[config.guard_factor_col] = 1.0
-
-    # =================================================================
-    # 1. 決算イベントガード（銘柄別）
-    # =================================================================
-    if (
-        earnings_calendar is not None
-        and not earnings_calendar.empty
-        and config.earnings_block
-    ):
-        earn = earnings_calendar.copy()
-        earn[config.earnings_date_col] = pd.to_datetime(earn[config.earnings_date_col])
-
-        # date, symbol のユニーク組み合わせに絞る
-        earn_flag = (
-            earn[[config.earnings_date_col, config.earnings_symbol_col]]
-            .dropna()
-            .drop_duplicates()
-            .rename(
-                columns={
-                    config.earnings_date_col: config.date_col,
-                    config.earnings_symbol_col: config.symbol_col,
-                }
+    @staticmethod
+    def _load_calendar(path: str) -> pd.DataFrame:
+        try:
+            df = pd.read_csv(path, parse_dates=["date"])
+        except FileNotFoundError:
+            df = pd.DataFrame(
+                columns=[
+                    "date",
+                    "event_type",
+                    "subtype",
+                    "hedge_ratio",
+                    "hedge_days",
+                    "comment",
+                ]
             )
-        )
+        if not df.empty:
+            df["date"] = df["date"].dt.date
+        return df
 
-        key_cols = [config.date_col, config.symbol_col]
+    @staticmethod
+    def _load_earnings(path: str) -> pd.DataFrame:
+        try:
+            df = pd.read_csv(path, parse_dates=["date"])
+        except FileNotFoundError:
+            df = pd.DataFrame(columns=["symbol", "date"])
+        if not df.empty:
+            df["date"] = df["date"].dt.date
+        return df
 
-        df = df.merge(
-            earn_flag.assign(**{config.flag_earnings_col: True}),
-            on=key_cols,
-            how="left",
-            suffixes=("", "_earnings_tmp"),
-        )
+    # ---------------- ヘッジロジック ------------------------------------
 
-        # merge後の一時列に True が立っているので、それを反映
-        tmp_col = config.flag_earnings_col + "_earnings_tmp"
-        if tmp_col in df.columns:
-            df[config.flag_earnings_col] = df[config.flag_earnings_col] | df[tmp_col].fillna(False)
-            df = df.drop(columns=[tmp_col])
+    def get_hedge_ratio(self, today: date) -> float:
+        """
+        今日の「引け」で適用するヘッジ比率を返す。
 
-        # 決算日の銘柄は guard_factor を 0 に
-        df.loc[df[config.flag_earnings_col], config.guard_factor_col] *= 0.0
+        calendar.csv の各行について、
+        start_date <= today < start_date + hedge_days
+        の期間なら有効とみなし、その中で最大の hedge_ratio を返す。
+        """
+        if self._calendar.empty:
+            return 0.0
 
-    # =================================================================
-    # 2. マクロイベントガード（日次・全銘柄）
-    # =================================================================
-    if macro_calendar is not None and not macro_calendar.empty:
-        macro = macro_calendar.copy()
-        macro[config.macro_date_col] = pd.to_datetime(macro[config.macro_date_col])
+        ratio = 0.0
 
-        if config.macro_importance_col in macro.columns:
-            macro_hi = macro[
-                macro[config.macro_importance_col] >= config.macro_block_importance
-            ][[config.macro_date_col]].drop_duplicates()
-        else:
-            macro_hi = macro[[config.macro_date_col]].drop_duplicates()
+        for _, row in self._calendar.iterrows():
+            start = row["date"]
+            days = int(row.get("hedge_days", 1))
+            end = start + timedelta(days=days)
 
-        macro_hi = macro_hi.rename(columns={config.macro_date_col: config.date_col})
+            if start <= today < end:
+                r = float(row.get("hedge_ratio", self.cfg.default_hedge_ratio))
+                ratio = max(ratio, r)
 
-        df = df.merge(
-            macro_hi.assign(**{config.flag_macro_col: True}),
-            on=[config.date_col],
-            how="left",
-            suffixes=("", "_macro_tmp"),
-        )
+        return ratio
 
-        tmp_col = config.flag_macro_col + "_macro_tmp"
-        if tmp_col in df.columns:
-            df[config.flag_macro_col] = df[config.flag_macro_col] | df[tmp_col].fillna(False)
-            df = df.drop(columns=[tmp_col])
+    # ---------------- 決算除外ロジック ----------------------------------
 
-        # 強イベント日は guard_factor を縮小
-        df.loc[df[config.flag_macro_col], config.guard_factor_col] *= config.macro_risk_factor
+    def get_excluded_symbols(self, today: date) -> Set[str]:
+        """
+        今日ユニバースから除外すべき銘柄を返す。
+        v1.1 では「決算当日のみ除外」でOK。
+        """
+        if self._earnings.empty:
+            return set()
 
-    # =================================================================
-    # 3. VIXガード（日次・全銘柄）
-    # =================================================================
-    if vix is not None and not vix.empty:
-        v = vix.copy()
-        v[config.vix_date_col] = pd.to_datetime(v[config.vix_date_col])
-        v = v.rename(columns={config.vix_date_col: config.date_col})
+        mask = self._earnings["date"] == today
+        todays = self._earnings.loc[mask, "symbol"]
+        return set(todays.astype(str).tolist())
 
-        # VIX値のカラムを決定
-        if config.vix_value_col not in v.columns:
-            candidate_cols = [c for c in ["close", "adj_close", "Close", "Adj Close"] if c in v.columns]
-            if candidate_cols:
-                use_col = candidate_cols[0]
-            else:
-                use_col = None
-        else:
-            use_col = config.vix_value_col
+    # ---------------- ユーティリティ ------------------------------------
 
-        if use_col is not None:
-            v = v[[config.date_col, use_col]].rename(columns={use_col: config.vix_value_col})
-
-            df = df.merge(v, on=[config.date_col], how="left")
-
-            # 閾値でフラグ
-            df[config.flag_vix_col] = df[config.vix_value_col] >= config.vix_risk_threshold
-            df[config.flag_vix_block_col] = df[config.vix_value_col] >= config.vix_block_threshold
-
-            # 中リスク: factor *= vix_risk_factor
-            df.loc[df[config.flag_vix_col], config.guard_factor_col] *= config.vix_risk_factor
-            # 高リスク: 完全カット
-            df.loc[df[config.flag_vix_block_col], config.guard_factor_col] = 0.0
-
-    # =================================================================
-    # 4. 最終ウェイトの計算
-    # =================================================================
-    df[config.weight_col] = df[config.weight_raw_col] * df[config.guard_factor_col]
-
-    return df
+    @property
+    def inverse_symbol(self) -> str:
+        return self.cfg.inverse_symbol

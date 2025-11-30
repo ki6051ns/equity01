@@ -31,18 +31,21 @@ class ScoringEngineConfig:
     # Large / Mid / Small の比率（合計1になるように）
     size_bucket_weights: dict = field(
         default_factory=lambda: {
-            "Large": 1 / 3,
-            "Mid": 1 / 3,
-            "Small": 1 / 3,
+            "Large": 0.4,
+            "Mid": 0.4,
+            "Small": 0.2,
         }
     )
 
-    # bucket 内で銘柄を選ぶ際の最小スコア閾値
+    # bucket 内で銘柄を選ぶ際の最小スコア閾値（後方互換性のため残す）
     min_score_threshold: float = -np.inf  # とりあえず制約なし
 
     # 最終的に weight をどう計算するか
-    # "equal": 同一重み, "score": feature_score 比例
-    weighting_scheme: Literal["equal", "score"] = "equal"
+    # "equal": 同一重み, "score": feature_score 比例, "zscore": z_score_bucket 比例
+    weighting_scheme: Literal["equal", "score", "zscore"] = "zscore"
+    
+    # バケット内 z-score の最小閾値（弱いスコアを切る）
+    min_zscore: float = 0.0  # 0.0 以上なら弱い銘柄を除外
 
     # 日次グルーピングに使うカラム
     date_col: str = "date"
@@ -142,7 +145,6 @@ def build_daily_portfolio(
     )
 
     # 3. 日次 & bucket ごとの上位銘柄選定
-    #    → まずは target 数を算出
     def _select_for_day(day_df: pd.DataFrame) -> pd.DataFrame:
         day_df = day_df.copy()
 
@@ -153,47 +155,74 @@ def build_daily_portfolio(
             for bucket, w in config.size_bucket_weights.items()
         }
 
-        day_df["selected"] = False
-
-        # 各 bucket ごとに上位を選定
-        for bucket, n_target in per_bucket_target.items():
-            mask_bucket = day_df[config.size_bucket_col] == bucket
-            tmp = day_df[mask_bucket]
-
-            if tmp.empty:
-                continue
-
-            # 閾値でフィルタ
-            tmp = tmp[tmp[config.score_col] >= config.min_score_threshold]
-
-            if tmp.empty:
-                continue
-
-            tmp = tmp.sort_values(config.score_col, ascending=False).head(n_target)
-
-            day_df.loc[tmp.index, "selected"] = True
-
-        # 4. weight 計算
-        sel = day_df[day_df["selected"]]
-
-        if sel.empty:
-            day_df["weight"] = 0.0
-            return day_df
-
-        if config.weighting_scheme == "equal":
-            w = 1.0 / len(sel)
-            day_df["weight"] = np.where(day_df["selected"], w, 0.0)
-        elif config.weighting_scheme == "score":
-            scores = sel[config.score_col].clip(lower=0)
-            if scores.sum() == 0:
-                w = 1.0 / len(sel)
-                day_df["weight"] = np.where(day_df["selected"], w, 0.0)
+        # --- バケットごとの Z-score 再計算 -----------------------------
+        def z_in_bucket(g: pd.DataFrame) -> pd.DataFrame:
+            x = g[config.score_col].astype(float)
+            mu = x.mean()
+            sigma = x.std(ddof=0)
+            if sigma == 0:
+                g["z_score_bucket"] = 0.0
             else:
-                w_series = scores / scores.sum()
-                day_df["weight"] = 0.0
-                day_df.loc[sel.index, "weight"] = w_series
-        else:
-            raise ValueError(f"未知の weighting_scheme: {config.weighting_scheme}")
+                g["z_score_bucket"] = (x - mu) / sigma
+            return g
+
+        day_df = day_df.groupby(config.size_bucket_col, group_keys=False).apply(z_in_bucket)
+
+        # 閾値で「弱いスコア」を切る（動きを出すポイント）
+        min_z = config.min_zscore
+        day_df = day_df[day_df["z_score_bucket"] > min_z].copy()
+
+        # 初期化
+        day_df["selected"] = False
+        day_df["weight"] = 0.0
+
+        # --- 各 bucket ごとに銘柄を選定＆ウェイト付け -------------------
+        for bucket, n_target in per_bucket_target.items():
+            bucket_df = day_df[day_df[config.size_bucket_col] == bucket]
+
+            if bucket_df.empty:
+                continue
+
+            # z_score 高い順に並べて上位 n_target を取る
+            bucket_df = bucket_df.sort_values("z_score_bucket", ascending=False)
+            selected = bucket_df.head(n_target)
+
+            idx = selected.index
+
+            if config.weighting_scheme == "equal":
+                w = 1.0 / len(selected)
+                day_df.loc[idx, "weight"] = w
+
+            elif config.weighting_scheme == "zscore":
+                # 正の z-score を重みとして正規化
+                z = selected["z_score_bucket"].clip(lower=0.0)
+                total = z.sum()
+                if total > 0:
+                    day_df.loc[idx, "weight"] = z / total
+                else:
+                    # すべて同じ or 0 なら等ウェイト fallback
+                    w = 1.0 / len(selected)
+                    day_df.loc[idx, "weight"] = w
+
+            elif config.weighting_scheme == "score":
+                s = selected[config.score_col].clip(lower=0.0)
+                total = s.sum()
+                if total > 0:
+                    day_df.loc[idx, "weight"] = s / total
+                else:
+                    w = 1.0 / len(selected)
+                    day_df.loc[idx, "weight"] = w
+
+            else:
+                raise ValueError(f"未知の weighting_scheme: {config.weighting_scheme}")
+
+            # 選定フラグ
+            day_df.loc[idx, "selected"] = True
+
+        # --- 日次のウェイトを全体で再正規化（保険的に） -----------------
+        w_sum = day_df["weight"].sum()
+        if w_sum > 0:
+            day_df["weight"] = day_df["weight"] / w_sum
 
         return day_df
 
