@@ -1,0 +1,181 @@
+progress_report_8th_9th_commit.md
+# equity01 進捗報告書（8th_commit ＋ 9th_commit）
+**作成日: 2025/11/30**
+
+---
+
+## 1. 概要
+
+本報告書は **8th_commit と 9th_commit** の成果を統合した進捗サマリです。  
+6th〜7th で構築した **コアパイプライン（price → feature → scoring → portfolio → paper_trade）** を基盤に、
+
+- Event Guard の本格設計
+- α/β 分離フレームの完成
+- Return ベースの標準化出力
+
+までを実現しました。
+
+---
+
+## 2. 8th_commit の成果（Event Guard v1.1：設計 & フレーム実装）
+
+### ✔ must-kill イベント方針の整理
+
+EventGuard v1.1 では、リスクを「殺すべきイベント」として階層化：
+
+**優先1 — Macro ボラ（必殺級）**
+- FOMC / CPI / 雇用統計 / BOJ（政策決定＋総裁会見）  
+- メジャーSQ（寄りが危険、前日引け→当日引けのヘッジで吸収）
+
+**優先2 — 決算ギャップ対策（国内株固有の最大リスク）**
+
+**優先3 — WE跨ぎ（Friday→Monday）**
+
+**優先4〜5（次フェーズで検討）**
+- 当日ギャップ > ±1%
+- IV/VI の急騰
+
+---
+
+### ✔ EventGuard クラスの実装（v1.1）
+
+`scripts/event_guard.py` を整備し、以下を実装：
+
+```python
+get_excluded_symbols(date)  # 決算銘柄除外（現状は枠組みのみ）
+get_hedge_ratio(date)       # 日次のヘッジ比率（0.0〜1.0）
+inverse_symbol              # インバースETFのコード
+
+
+メジャーイベント前日の引けでヘッジ構築 → 当日引けで解消 の運用方針に最適化。
+
+これにより、日中寄り付きのスパイク（SQ/U.S.イベント）を完全に回避。
+
+✔ build_portfolio との統合
+
+daily_portfolio_guarded.parquet に以下を追加：
+
+hedge_ratio
+inverse_symbol
+decision_date   # T-1
+trading_date    # T
+
+
+決算銘柄の 日付別フィルタ も導入し、
+今後 event01 から自動で除外される構造が完成。
+
+3. 9th_commit の成果（α/β 分離・Return 標準化）
+✔ paper_trade（PnL → Return標準化）
+
+旧版：PnL（実額）と Return が混在し、
+アンサンブルやα評価に不向きだった。
+
+新版（9th_commit）では：
+
+出力を Return 系に統一：
+
+daily_return
+daily_return_alpha
+daily_return_hedge
+equity
+drawdown
+
+
+PnL は内部で保持するが出力しない。
+→ ALPHAERS 全体が “Returnベースの標準化ストラテジー” として接続可能に。
+
+✔ calc_alpha_beta：relative α の可視化完了
+
+ポートフォリオ Return を累積化（CC return）
+
+TOPIX と比較 → 相対αを日次で算出
+
+例（2025-10-31〜2025-11-27）：
+
+Port: +2.07%
+TOPIX: +2.11%
+Relative α: -0.04%
+
+
+EventGuard が未稼働の今は当然だが、
+「βを切り離し、純粋なαを可視化できる」 という構造の完成が重要。
+
+✔ ScoringEngineConfig の整備（build_portfolio の重複排除）
+
+build_portfolio.py のハードコードを除去し、
+スコアリングのパラメータを scoring_engine.py に一本化
+
+現在の安定ベースライン：
+
+max_names_per_day = 30
+size_bucket_weights = {"Large": 0.4, "Mid": 0.4, "Small": 0.2}
+weighting_scheme = "zscore"
+min_zscore = -0.5 ~ 0.0
+
+4. 進捗の定量評価（8th ＋ 9th 時点）
+✔ 実装ステータス
+機能	状況
+EventGuard v1.1	✔ 枠組み完了／日付別除外・ヘッジIF
+daily_portfolio_guarded	✔ 正常出力
+paper_trade（Return標準化）	✔ α/ヘッジ別 Return 出力
+calc_alpha_beta（relative α）	✔ Port vs TOPIX の差分算出
+ScoringEngineConfig 統一	✔ 管理の一元化
+✔ テストレンジ
+
+2025-10-31〜2025-11-27（18営業日）
+αは ±0% 付近（当然）。
+重要なのは 構造が動いていること。
+
+5. 次の工程（10th_commit 以降）
+🔥 ホライゾンアンサンブル（Time Horizon Ensemble）
+
+1日／3日／5日 モメンタムを並列構築
+
+WE跨ぎ・祝日跨ぎの調整をホライゾン側で吸収
+
+ALPHAERS での multi-horizon スタックの基盤を作る
+
+🔥 パラメータアンサンブル（zscore × score）
+
+weight_z と weight_s を scoring_engine 内で同時計算し、
+λ を使ってアンサンブル：
+
+weight_final = (1 - λ) * weight_z + λ * weight_s
+
+
+レジームに応じて λ を可変：
+
+トレンド相場：score 寄り
+
+ノイジー相場：zscore 寄り
+
+🔥 event01（カレンダーベース）／event02（リアルタイム）
+
+event01：メジャーイベントカレンダーを parquet 化 → EventGuard が参照
+
+event02：地震・地政学・ニュースフラッシュなど
+RADEN / forex03 と連携するリアルタイムスクランブルヘッジ
+
+6. 所感
+
+8th〜9th で、equity01 は以下を達成：
+
+守り（EventGuard v1.1）
+
+測定（relative α）
+
+標準化（Returnのみ出力）
+
+これにより、「βから独立した本当のα」を測る準備が整った。
+次はいよいよ 攻め（ホライゾン／パラメータアンサンブル） のフェーズへ突入する。
+
+Prepared by equity01 / Strategy Core Layer
+8th & 9th commit progress report
+
+
+---
+
+必要ならこのまま GitHub に push するだけで OK です。  
+`docs/` 以下に置く場合はファイル名を `equity01_progress_8th_9th.md` にしても良いでしょう。
+
+次は **ホライゾンアンサンブルのインターフェース** を設計しますか？
