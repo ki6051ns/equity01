@@ -42,18 +42,59 @@ def main():
 
         # parquet 形式に整理
         data = data.reset_index()
-        data.rename(columns={
-            "Date": "date",
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Adj Close": "adj_close",
-            "Volume": "volume"
-        }, inplace=True)
+        
+        # MultiIndexの列をフラット化（yf.download()がMultiIndexを返す場合がある）
+        if isinstance(data.columns, pd.MultiIndex):
+            # MultiIndexの場合は最初のレベルだけを使う
+            data.columns = [col[0] if isinstance(col, tuple) and len(col) > 0 else str(col) for col in data.columns]
+        
+        # 列名の正規化（大文字小文字を考慮）
+        rename_map = {}
+        for col in data.columns:
+            col_str = str(col).strip()
+            if col_str.lower() in ("date", "datetime"):
+                rename_map[col] = "date"
+            elif col_str == "Open":
+                rename_map[col] = "open"
+            elif col_str == "High":
+                rename_map[col] = "high"
+            elif col_str == "Low":
+                rename_map[col] = "low"
+            elif col_str == "Close":
+                rename_map[col] = "close"
+            elif col_str in ("Adj Close", "AdjClose", "Adj_Close"):
+                rename_map[col] = "adj_close"
+            elif col_str == "Volume":
+                rename_map[col] = "volume"
+        
+        if rename_map:
+            data.rename(columns=rename_map, inplace=True)
+        
+        # デバッグ: 列名を確認
+        if "close" not in data.columns or "volume" not in data.columns:
+            print(f"[DEBUG] {tkr}: 列名確認 - columns={list(data.columns)}")
 
         data["symbol"] = tkr
-        data["turnover"] = None  # 必須ではないので空でOK
+        
+        # turnover は必ず close * volume で計算
+        if "close" in data.columns and "volume" in data.columns:
+            try:
+                # locを使って確実にSeriesを取得
+                close_series = data.loc[:, "close"]
+                volume_series = data.loc[:, "volume"]
+                
+                # 数値型に変換してから計算
+                close_num = pd.to_numeric(close_series, errors="coerce")
+                volume_num = pd.to_numeric(volume_series, errors="coerce")
+                data["turnover"] = close_num * volume_num
+            except Exception as e:
+                print(f"[WARN] {tkr}: turnover計算エラー: {e}")
+                print(f"  close列の型: {type(data.get('close'))}, volume列の型: {type(data.get('volume'))}")
+                print(f"  列名: {list(data.columns)}")
+                data["turnover"] = None
+        else:
+            print(f"[WARN] {tkr}: closeまたはvolume列が見つかりません。columns={list(data.columns)}")
+            data["turnover"] = None
 
         # 必要な列だけに整理
         cols = ["date", "symbol", "open", "high", "low", "close", "adj_close", "volume", "turnover"]

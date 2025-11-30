@@ -296,11 +296,18 @@ class DataLoader:
                     break
         df[DATE_COL] = pd.to_datetime(df[DATE_COL], errors="coerce").dt.tz_localize(None)
         df[DATE_COL] = pd.to_datetime(df[DATE_COL].dt.date)
-        for c in ("open", "high", "low", "close", "adj_close", "turnover"):
+        for c in ("open", "high", "low", "close", "adj_close"):
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce").astype("float32")
         if "volume" in df.columns:
             df["volume"] = pd.to_numeric(df["volume"], errors="coerce").astype("float64")
+        # turnover は必ず close * volume で再計算
+        if "close" in df.columns and "volume" in df.columns:
+            close_num = pd.to_numeric(df["close"], errors="coerce")
+            volume_num = pd.to_numeric(df["volume"], errors="coerce")
+            df["turnover"] = (close_num * volume_num).astype("float64")
+        else:
+            df["turnover"] = pd.NA
         # 列を揃える
         for c in STD_COLS:
             if c not in df.columns:
@@ -405,9 +412,18 @@ def load_prices() -> pd.DataFrame:
         if "adj_close" not in df.columns:
             df["adj_close"] = df["close"]
 
-        # turnover が無ければ None のままでOK（build_features 側で再計算しているので任意）
-        if "turnover" not in df.columns:
-            df["turnover"] = None
+        # volume が無ければ turnover は計算不可
+        if "volume" not in df.columns:
+            df["volume"] = pd.NA
+
+        # turnover は必ず close * volume で再計算（既存データが None でも上書き）
+        if "close" in df.columns and "volume" in df.columns:
+            # 数値型に変換してから計算
+            close_num = pd.to_numeric(df["close"], errors="coerce")
+            volume_num = pd.to_numeric(df["volume"], errors="coerce")
+            df["turnover"] = (close_num * volume_num).astype("float64")
+        else:
+            df["turnover"] = pd.NA
 
         df["date"] = pd.to_datetime(df["date"])
         frames.append(df[["date", "symbol", "open", "high", "low", "close", "adj_close", "volume", "turnover"]])
