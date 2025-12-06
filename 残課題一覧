@@ -1,5 +1,8 @@
-# equity01 残課題一覧 & 対応状況（2025/11/30 時点）
-8th_commit + 9th_commit の成果を反映した最新版。
+# equity01 残課題一覧 & 対応状況  
+**Updated: 2025/12/04（10th_commit 反映）**
+
+本一覧は 8th → 9th → 10th_commit の成果と、  
+**ラダー方式ホライゾンバックテスト（H1〜H120）** の採用方針を踏まえた最新版です。
 
 ---
 
@@ -7,11 +10,11 @@
 
 | 項目 | 内容 | 状況 |
 |------|------|------|
-| 複数銘柄の parquet 化 | 27銘柄 → 94銘柄へ変換 | ✔ 完了（6th） |
+| 94銘柄 parquet 化 | 日次価格パネル基盤 | ✔ 完了 |
 | ユニバーススナップショット | 月次/四半期で universe 保存 | ⏳ 未実装 |
-| 東証休日カレンダー完全対応 | 祝日/臨時休場/米国休場含む | 🔜 event01 前に必須 |
-| Cutoff Policy（D-1 08:00 JST） | NY引け → 東京朝確定 | ✔ 完了 |
-| NY祝日対応 | FX/VIX/先物の欠損吸収 | ⏳ 未実装 |
+| 東証休日カレンダー | 祝日/臨時休場/米国休場含む | 🔜 event01 前に必須 |
+| NY 祝日対応 | FX/VIX/先物の欠損吸収 | ⏳ |
+| Cutoff Policy（D-1 08:00） | 全スクリプトで統一 | ✔ |
 
 ---
 
@@ -19,25 +22,25 @@
 
 | 項目 | 内容 | 状況 |
 |------|------|------|
-| 基本シグナル（ret/vol/adv） | ret_5 / ret_20 / vol_20 / ADV | ✔ |
-| 出来高加速（volume acceleration） | ADV比の速度 | ⏳ |
-| 過熱抑制 flag（heat_flag） | z-score ベース | ✔ |
-| Quick-FA（EPS, ROIC等） | 速報系ファンダ | ❌ 別フェーズ |
-| strength（廃止） | 不要と判断 | ⚠️ 廃止 |
+| 基本 ret/vol/ADV | ret_5, ret_20, vol_20, ADV | ✔ |
+| heat_flag（過熱抑制） | zscore ベース | ✔ |
+| volume acceleration | 成行インパクト低減に重要 | ⏳ |
+| multi-horizon feature | H60/H90/H120 の安定化支援 | ⏳ 検討中 |
+| Quick-FA | EPS, ROIC | ❌ scope外 |
+| strength | ノイズ源のため廃止 | ✔ |
 
 ---
 
-# 3. Scoring Engine（スコアリング）
+# 3. Scoring Engine
 
 | 項目 | 内容 | 状況 |
 |------|------|------|
-| Z-score 正規化 | bucket 内で標準化 | ✔ |
-| 特性ペナルティ | 流動性, 過熱, vol | ✔ |
-| σ補正（σ^β） | weight補正 | ✔ |
-| size bucket 正規化 | Large/Mid/Small で均等化 | ✔ |
-| top N 選抜 | スコア上位採用 | ✔ |
-| daily_feature_scores 保存 | parquet 化 | ✔ |
-| weighting_scheme | equal/score/zscore | ✔ |
+| Z-score 正規化 | size bucket 内標準化 | ✔ |
+| 特性ペナルティ | 過熱/vol/liquidity | ✔ |
+| size bucket | Large/Mid/Small の均等化 | ✔ |
+| weighting scheme | score / zscore / equal | ✔ |
+| パラメータアンサンブル | zscore × score (λ) | ⏳ 次フェーズ |
+| score保存 | daily_feature_scores.parquet | ✔ |
 
 ---
 
@@ -45,132 +48,143 @@
 
 | 項目 | 内容 | 状況 |
 |------|------|------|
-| size bucket 分類 | 流動性分位 | ✔ |
-| weight 正規化 | 等金額 or z-score | ✔ |
-| max_names（ポジション数） | 30（安定設定） | ✔ |
-| decision_date / trading_date | cutoff反映 | ✔ |
-| β制御（ETF階段制御） | 0.6/0.4/0.2 など | ⏳ 未実装 |
-| レバレッジ管理（VAR ≤ 2%） | VARベース | ❌ 未着手 |
+| max_names = 30 | 最適解として安定 | ✔ |
+| weight 正規化 | sum=1.0 / zscore重み | ✔ |
+| decision ↔ trading date | cutoff理論に基づく | ✔ |
+| β制御（ETF階段） | β 0.6 / 0.4 / 0.2 | ⏳ 中期 |
+| レバレッジ管理（VAR） | VAR ≤ 2% | ❌ 未着手 |
+| 実務クリーニング層 | 極小weightカット（min_abs） | ✔ |
 
 ---
 
-# 5. EventGuard（イベント反射層）
+# 5. EventGuard（イベント反射）
 
 | バージョン | 内容 | 状況 |
 |------------|------|------|
-| v0.1 | skeleton | ✔ |
-| v0.2 | flag_earnings / soft_guard | ✔（7th） |
-| v1.1 | must-kill設計（FOMC/SQ/BOJ）＋前日引けヘッジ | ✔（8th） |
-| v0.3 | 先物・為替・VIX の閾値判定 | ⏳ |
-| v0.4 | BOJ/FOMC の LLMスコアリング | ❌ |
-| v1.0 | Guard 層全体統合（ALPHAERS連結） | 🔜 2026Q1 |
+| v1.1 | FOMC/SQ/CPI/BOJ → must-kill | ✔ |
+| v1.1 | 決算除外（日付ベース） | ✔ |
+| v1.1 | 前日引けヘッジ → 当日解消 | ✔ |
+| v0.3 | 225先物・USDJPY・VIX の閾値 | ⏳ 2026Q1 |
+| v0.4 | BOJ/FOMC LLMスコアリング | ❌ |
+| v1.0 | event01 + event02 完全統合 | 🔜 |
 
 ---
 
-# 6. レジーム判定（market regimes）
+# 6. Horizon Ensemble（10th_commit の主成果）
 
 | 項目 | 内容 | 状況 |
 |------|------|------|
-| equity01 内部レジーム | Momentum × VIX の簡易版 | ⚠️ 廃止（不要） |
-| ALPHAERS 側レジーム | 戦略横断の判定に移管 | ✔ 方針確定 |
-| breadth PCA | 市場広さで regime | ⏳ |
-| HMM 2/3 state | 上昇/下降/ボラ | ❌ 未着手 |
+| H1〜H120 ラダーBT | 完全実装 | ✔ |
+| 非ラダー→ラダー移行 | H1/H5/H10/H20 の精度改善 | ✔ |
+| H60/H90/H120 採用 | コアホライゾンに確定 | ✔ |
+| H5/H10 は補助採用 | 非ラダー weak signal | ✔ |
+| H1/H20 は縮小 | ノイズ要因 | ✔ |
+| Ensemble 設計 | equal weight / var weight | ⏳ 次フェーズ |
+| Ensemble Runner | run_equity01_eval.py に統合 | ✔ |
 
 ---
 
-# 7. Intraweek Overlay（週内ロジック）
+# 7. Regime 判定
 
 | 項目 | 内容 | 状況 |
 |------|------|------|
-| 月→木：通常 | 稼働 | 🔄 検討中 |
-| 木→金：軽度縮小 | 金曜イベント回避 | ⏳ |
-| 金→月：禁止/縮小 | WE跨ぎリスク | ⏳ |
-| 週内 β階段 | 0.5→0.35→0.2 | ❌ 未実装 |
+| equity01 内部レジーム | 使用価値低 → 廃止 | ✔ |
+| breadth PCA | 市場回復/拡散の強度分析 | ⏳ |
+| Sticky-HMM | regime 2〜3 state | ❌ |
+| ALPHAERS 共通レジーム | multipliers 適用 | 🔜 |
 
 ---
 
-# 8. ペーパートレード（単体テスト基盤）
+# 8. Intraweek Overlay（週内ロジック）
 
 | 項目 | 内容 | 状況 |
 |------|------|------|
-| fwd return（D→D+1） | feature builderで生成 | ✔ |
-| daily_trade.csv | 出力正常 | ✔ |
-| Sharpe/DD/Exposure | QA基盤 | ✔ |
-| 94銘柄 backtest | 2015-2025 完走 | ✔ |
-| explainability（勝因/敗因） | LLM で文章生成 | ⏳ |
-| relative α（calc_alpha_beta） | Port vs TOPIX | ✔（9th） |
+| 月〜木 通常稼働 | 現状のベース | ✔ |
+| 木→金 の縮小 | macro event 対応 | ⏳ |
+| 金→月 WE跨ぎ縮小 | 最大リスク | ⏳ |
+| 週内β階段 | β0.5 → β0.35 → β0.20 | ❌ 未実装 |
 
 ---
 
-# 9. 品質保証（QA）
+# 9. Paper Trade & QA
 
 | 項目 | 内容 | 状況 |
 |------|------|------|
-| Why 投資判断（説明可能性） | QA基準策定 | ✔ |
-| 市場環境との整合性 | 外部要因照合 | 🔄 |
-| 非合理挙動の切り分け | スコア vs レジーム | 🔄 |
-| スコア分布チェック | hist, QQ | ✔ |
-| 銘柄寄与度 | factor使用 | 未実装 |
+| Returnベースに統一 | PnL混在を廃止 | ✔ |
+| relative α 可視化 | calc_alpha_beta v2 | ✔ |
+| H60/H90/H120 毎の統計 | 生成済 | ✔ |
+| 銘柄寄与度分析 | contribution decomposition | ⏳ |
+| 勝因/敗因の LLM 生成 | ALPHAERS共通仕組みへ | ⏳ |
+| 回帰（β推計） | horizon別 β | ⏳ |
 
 ---
 
-# 10. 外部接続（β・指数・ETF）
+# 10. 外部接続（β・指数・先物）
 
 | 項目 | 内容 | 状況 |
 |------|------|------|
-| index loader（TOPIX/225） | daily_loader | ⏳ |
-| ETF loader（1570, 1306） | β制御用 | ⏳ |
-| β計算（cov/var） | β_neutral / β_target | ❌ |
-| 相関行列（11資産） | ALPHAERS側で利用 | 🔜 |
+| index loader（TOPIX/225） | relative α用途 | ✔ |
+| ETF loader（1306/1570） | β制御 | ⏳ |
+| 225先物5分足 | Guard v0.3 | ⏳ |
+| USDJPY/VIX | Guard v0.3 | ⏳ |
+| グローバル株式連動 | equity02/03への流用 | 🔜 |
 
 ---
 
-# 11. その他
+# 11. コード品質・高速化
 
 | 項目 | 内容 | 状況 |
 |------|------|------|
-| ログ最適化 | print → logger | ⏳ |
-| エラー吸収 | feature builder改善済 | ✔ |
-| outlier処理 | price jump, zero volume | ⏳ |
+| print → logger | ログ階層化 | ⏳ |
+| vectorize | 新規 horizon BT で要改善 | 🔜 |
+| parquet schema 統一 | 互換性の徹底 | ✔ |
 | スコア世代管理 | scores_YYYYMMDD | ✔ |
-| backtest高速化 | vectorize / merge削減 | 🔜 |
+| outlier処理 | price jump, zero vol | ⏳ |
 
 ---
 
-# 🔎 優先度（A/B/C）
+# 🔥 優先度（A / B / C）
 
-## **A：最優先（10th_commit〜）**
-- EventGuard v0.3（先物・為替・VIX 閾値）
-- β制御（ETF 階段）
-- Intraweek Overlay（木→金、金→月）
-- レジーム判定（ALPHAERS 側の中核へ）
-- NY祝日対応＋cutoff 完全対応
+## **A：最優先（現在着手すべき）**
+- Ensemble（H60/H90/H120）v0.1  
+- EventGuard v0.3（FX・先物・VIX）  
+- Intraweek Overlay（木→金、金→月）  
+- β制御（ETF階段）  
+- NY祝日対応・cutoff完全対応  
 
-## **B：次優先（品質強化）**
-- スコア分布 QA / 因果性分析
-- 勝因/敗因の自動説明（LLM）
-- ユニバーススナップショット（月次）
+---
+
+## **B：次優先（品質・安定性）**
+- パラメータアンサンブル（zscore × score）  
+- 勝因/敗因説明（LLM）  
+- ユニバーススナップショット（月次）  
+- breadth PCA（regime基盤）  
+
+---
 
 ## **C：中期（2026Q1〜）**
-- breadth PCA
-- HMM（2–3 state）
-- Multi-Horizon Ensemble
-- パラメータアンサンブル（zscore × score）
-- VAR/レバレッジ管理
+- Sticky-HMM による regime 2–3 state  
+- VARベースのレバレッジ管理  
+- multi-horizon weight optimization  
+- outlier処理の自動化  
 
 ---
 
-# 🧩 現状の到達点（まとめ）
+# 🎯 現状の総括（10th_commit 時点）
 
-- 6th〜7th で **戦略単体として動く最低要件** が完成  
-  → price → feature → scoring → PF → Guard → paper_trade が自動化
-- 8th〜9th で  
-  - **守り（EventGuard v1.1）**  
-  - **測定（relative α）**  
-  - **標準化（Returnベース）**  
-  を実装し、戦略評価の基盤がほぼ完成。
+equity01 は以下の重要マイルストーンを達成：
 
-次フェーズは **攻め：  
-ホライゾンアンサンブル × パラメータアンサンブル × β制御 × Intraweek**。
+- **守り：EventGuard v1.1**  
+- **測定：relative α の確立**  
+- **安定化：ラダー方式ホライゾン（H60/H90/H120）**  
+- **透明性：全工程が可視化・再現可能**
 
-*Prepared by equity01 / Strategy Core Layer*  
+残る課題は
+
+> **アンサンブル・β制御・週内ロジック・ガード強化**
+
+という “実運用向け洗練フェーズ” に集中している。
+
+---
+
+Prepared by **equity01 / Strategy Core Layer（2025/12/04）**
