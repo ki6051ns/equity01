@@ -19,6 +19,69 @@ from weights_cleaning import clean_target_weights
 import data_loader
 
 
+# バックテストモード: "z_lin" / "rank" / "z_clip_rank" / "z_lowvol" / "z_downvol" / "z_downbeta" / "z_downcombo"
+BACKTEST_MODE = "z_lin"  # ← "rank" / "z_clip_rank" / "z_lowvol" / "z_downvol" / "z_downbeta" / "z_downcombo" に切り替え可能
+
+
+def get_score_col_for_horizon(horizon: int) -> str:
+    """
+    horizon に応じてスコア列を切り替える
+    
+    Parameters
+    ----------
+    horizon : int
+        投資ホライゾン（5, 10, 20, 60 など）
+    
+    Returns
+    -------
+    str
+        使用するスコア列名
+    """
+    if BACKTEST_MODE == "z_lin":
+        return "feature_score"  # = score_z_lin
+    elif BACKTEST_MODE == "rank":
+        return "score_rank_only"
+    elif BACKTEST_MODE == "z_clip_rank":
+        return "score_z_clip_rank"
+    elif BACKTEST_MODE == "z_lowvol":
+        return "score_z_lowvol"
+    elif BACKTEST_MODE == "z_downvol":
+        return "score_z_downvol"
+    elif BACKTEST_MODE == "z_downbeta":
+        return "score_z_downbeta"
+    elif BACKTEST_MODE == "z_downcombo":
+        return "score_z_downcombo"
+    else:
+        raise ValueError(f"Unknown BACKTEST_MODE: {BACKTEST_MODE}")
+
+
+def get_mode_suffix() -> str:
+    """
+    BACKTEST_MODE に応じたファイル名サフィックスを返す
+    
+    Returns
+    -------
+    str
+        ファイル名サフィックス（zlin, rank, zclip, zlowvol）
+    """
+    if BACKTEST_MODE == "z_lin":
+        return "zlin"
+    elif BACKTEST_MODE == "rank":
+        return "rank"
+    elif BACKTEST_MODE == "z_clip_rank":
+        return "zclip"
+    elif BACKTEST_MODE == "z_lowvol":
+        return "zlowvol"
+    elif BACKTEST_MODE == "z_downvol":
+        return "zdownvol"
+    elif BACKTEST_MODE == "z_downbeta":
+        return "zdownbeta"
+    elif BACKTEST_MODE == "z_downcombo":
+        return "zdowncombo"
+    else:
+        raise ValueError(f"Unknown BACKTEST_MODE: {BACKTEST_MODE}")
+
+
 def build_features_shared() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     共有 feature を一度だけ構築（既存の build_features.py の出力を利用）
@@ -77,8 +140,11 @@ def backtest_with_horizon(
     # 翌日のリターンを計算（close-to-close）
     prices_ret = prices_pivot.pct_change().shift(-1)
     
-    # ポートフォリオ構築用の設定
-    cfg = ScoringEngineConfig()
+    # ポートフォリオ構築用の設定（horizon に応じてスコア列を切り替え）
+    score_col = get_score_col_for_horizon(holding_horizon)
+    cfg = ScoringEngineConfig(
+        score_col=score_col,
+    )
     
     # 過去 h 本の clean_w を保存するキュー
     last_weights: List[pd.Series] = []
@@ -364,6 +430,12 @@ def compute_monthly_perf(df_alpha: pd.DataFrame, label: str, out_prefix: str) ->
     df["year"] = df["trade_date"].dt.year
     df["month"] = df["trade_date"].dt.month
     
+    # 空のDataFrameの場合は空の結果を返す
+    if len(df) == 0:
+        monthly_returns = pd.DataFrame(columns=["year", "month", "port_return", "tpx_return", "days", "rel_alpha"])
+        yearly = pd.DataFrame(columns=["year", "port_return", "tpx_return", "rel_alpha", "days"])
+        return monthly_returns, yearly
+    
     # 月次累積リターン（倍率ベース）
     monthly_returns = (
         df.groupby(["year", "month"])
@@ -376,8 +448,13 @@ def compute_monthly_perf(df_alpha: pd.DataFrame, label: str, out_prefix: str) ->
                 }
             )
         )
-        .reset_index()
     )
+    
+    # reset_index() の前に、既存の month カラムがあれば削除
+    if isinstance(monthly_returns, pd.DataFrame) and "month" in monthly_returns.columns:
+        monthly_returns = monthly_returns.drop(columns=["month"])
+    
+    monthly_returns = monthly_returns.reset_index()
     
     # 相対αの月次版（倍率ベースの差）
     monthly_returns["rel_alpha"] = (
@@ -437,9 +514,11 @@ def calc_alpha_beta_for_horizon(df_pt: pd.DataFrame, horizon: int) -> pd.DataFra
     df["cum_port"] = (1.0 + df["port_ret_cc"]).cumprod()
     df["cum_tpx"] = (1.0 + df["tpx_ret_cc"]).cumprod()
     
-    # 保存
+    # 保存（モードとラダー/非ラダーを含める）
     if horizon > 0:
-        out_path = Path(f"data/processed/paper_trade_with_alpha_beta_h{horizon}.parquet")
+        # backtest_with_horizon は常にラダー方式
+        suffix_mode = get_mode_suffix()
+        out_path = Path(f"data/processed/paper_trade_with_alpha_beta_h{horizon}_ladder_{suffix_mode}.parquet")
     else:
         out_path = Path("data/processed/paper_trade_with_alpha_beta_ensemble.parquet")
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -711,7 +790,9 @@ def run_horizon_ensemble(horizons: List[int] = [1, 5, 10, 20, 60], debug_h1_only
         print(f"\n[STEP 2-{h}] H{h} バックテスト実行中...")
         try:
             df_pt = backtest_with_horizon(features, prices, h)
-            pt_path = Path(f"data/processed/paper_trade_h{h}.parquet")
+            # ファイル名にモードとラダー/非ラダーを含める
+            suffix_mode = get_mode_suffix()
+            pt_path = Path(f"data/processed/paper_trade_h{h}_ladder_{suffix_mode}.parquet")
             pt_path.parent.mkdir(parents=True, exist_ok=True)
             df_pt.to_parquet(pt_path, index=False)
             print(f"  [H{h}] バックテスト完了: {len(df_pt)} 日分")
