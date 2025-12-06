@@ -39,14 +39,21 @@ def merge_portfolio_with_tpx(
     df_daily = df_daily.sort_values("trade_date")
 
     print(f"\npaper_trade 結果: {len(df_daily)} 日分")
-    print(
-        f"日付範囲: {df_daily['trade_date'].min()} ～ {df_daily['trade_date'].max()}"
-    )
+    pt_min = df_daily['trade_date'].min()
+    pt_max = df_daily['trade_date'].max()
+    print(f"日付範囲: {pt_min} ～ {pt_max}")
 
     print(f"\nTOPIX データ: {len(df_tpx)} 日分")
-    print(
-        f"日付範囲: {df_tpx['trade_date'].min()} ～ {df_tpx['trade_date'].max()}"
-    )
+    ix_min = df_tpx['trade_date'].min()
+    ix_max = df_tpx['trade_date'].max()
+    print(f"日付範囲: {ix_min} ～ {ix_max}")
+
+    # 日付チェック：TOPIXデータが古い場合はエラー
+    if ix_max < pt_max:
+        raise ValueError(
+            f"TOPIXデータが古いです: index_tpx_daily max={ix_max}, "
+            f"paper_trade max={pt_max}. build_index_tpx_dailyを更新してください。"
+        )
 
     df = df_daily.merge(df_tpx, on="trade_date", how="inner")
     df = df.sort_values("trade_date").reset_index(drop=True)

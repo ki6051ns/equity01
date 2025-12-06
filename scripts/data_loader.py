@@ -130,10 +130,14 @@ class DataLoader:
                         df["adj_close"] = df.get("close")
                     if "volume" not in df.columns:
                         df["volume"] = pd.NA
-                    df["turnover"] = (
-                        pd.to_numeric(df.get("close"), errors="coerce")
-                        * pd.to_numeric(df.get("volume"), errors="coerce")
-                    ).astype("float64")
+                    # turnover は必ず close * volume で再計算（build_features.pyと同じロジック）
+                    # ただし、数値型に変換してから計算（NaNを避けるため）
+                    if "close" in df.columns and "volume" in df.columns:
+                        close_num = pd.to_numeric(df["close"], errors="coerce")
+                        volume_num = pd.to_numeric(df["volume"], errors="coerce")
+                        df["turnover"] = close_num * volume_num
+                    else:
+                        df["turnover"] = pd.NA
                     for c in STD_COLS:
                         if c not in df.columns:
                             df[c] = pd.NA
@@ -301,11 +305,9 @@ class DataLoader:
                 df[c] = pd.to_numeric(df[c], errors="coerce").astype("float32")
         if "volume" in df.columns:
             df["volume"] = pd.to_numeric(df["volume"], errors="coerce").astype("float64")
-        # turnover は必ず close * volume で再計算
+        # turnover は必ず close * volume で再計算（build_features.pyと同じロジック）
         if "close" in df.columns and "volume" in df.columns:
-            close_num = pd.to_numeric(df["close"], errors="coerce")
-            volume_num = pd.to_numeric(df["volume"], errors="coerce")
-            df["turnover"] = (close_num * volume_num).astype("float64")
+            df["turnover"] = df["close"] * df["volume"]
         else:
             df["turnover"] = pd.NA
         # 列を揃える
@@ -416,12 +418,12 @@ def load_prices() -> pd.DataFrame:
         if "volume" not in df.columns:
             df["volume"] = pd.NA
 
-        # turnover は必ず close * volume で再計算（既存データが None でも上書き）
+        # turnover は必ず close * volume で再計算（build_features.pyと同じロジック）
+        # 数値型に変換してから計算（NaNを避けるため）
         if "close" in df.columns and "volume" in df.columns:
-            # 数値型に変換してから計算
             close_num = pd.to_numeric(df["close"], errors="coerce")
             volume_num = pd.to_numeric(df["volume"], errors="coerce")
-            df["turnover"] = (close_num * volume_num).astype("float64")
+            df["turnover"] = close_num * volume_num
         else:
             df["turnover"] = pd.NA
 

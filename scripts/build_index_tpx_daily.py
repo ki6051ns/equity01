@@ -29,7 +29,8 @@ def main() -> None:
     for symbol in tpx_symbols:
         try:
             print(f"TOPIX データ取得を試行中: {symbol}")
-            df = dl.load_stock_data(symbol)
+            # refresh=True で最新データを強制取得
+            df = dl.load_stock_data(symbol, refresh=True)
             if df is not None and not df.empty:
                 used_symbol = symbol
                 print(f"✓ {symbol} で取得成功")

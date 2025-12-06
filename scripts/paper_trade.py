@@ -17,7 +17,10 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 import config  # type: ignore
 
-STARTDATE = "2025-10-31"
+# STARTDATE は自動化：データが存在する最初の日を取得、または None で全期間
+# 固定値を使う場合は以下をコメントアウトして固定値を設定
+STARTDATE = None  # None にすると全期間を対象（推奨）
+# STARTDATE = "2015-01-01"  # 固定値を使う場合
 
 
 @dataclass
