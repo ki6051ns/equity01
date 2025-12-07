@@ -1,264 +1,447 @@
 # equity01: AI駆動・日本株インテリジェント日次トレーディングシステム  
-**Version 2.3 / Updated: 2025-12-04**
+**Version 2.4 / Updated: 2025-12-05**
 
 equity01 は **AI駆動 × 正統クオンツ**によって構築された  
 日本株向け **インテリジェント日次トレーディングシステム**です。
 
 本システムは ALPHAERS（統合戦略）の中心に位置する **エクイティ戦略レイヤー**であり、  
-**透明性、説明可能性、再現性（replicability）、堅牢性（robustness）** を最優先事項とします。
+**透明性・説明可能性・再現性（replicability）・堅牢性（robustness）** を最優先事項とします。
 
 ---
 
-# 🚀 プロジェクト概要
+## 🚀 プロジェクトの到達点イメージ
 
-equity01 が目指す到達点：
+equity01 が目指す姿：
 
-- **black-box に依存しない透明なスコア駆動構造**  
-- **α/β の完全分離（relative α の可視化）**
+- **black-box に依存しない透明なスコア駆動構造**
+- **α/β の完全分離（relative α の定量・可視化）**
 - **EventGuard によるイベントリスク遮断（ギャップ殺し）**
-- **週内ロジック（Intraweek Overlay）によるリスク抑制**
-- **β制御（ETF階段）による市場中立性の改善**
+- **STOP Regime による中期下落局面の自動ガード**
+- **β制御（インバースETF/キャッシュ）によるドローダウン縮小**
 - **Multi-Horizon / Parameter Ensemble による α の安定化と強化**
 
 最終的には、ALPHAERS 全体の内部で
 
 > **エクイティ・モジュール（Equity Alpha Engine）として常時稼働**
 
-することを目的とします。
+することを目的とする。
 
 ---
 
-# 🧱 アーキテクチャ構造（2025-12 Ver）
+## 🧱 アーキテクチャ構造（2025-12 Ver）
 
+```text
 equity01/
 ├─ data/
-│ ├─ raw/ # 日次価格パネル（94銘柄）
-│ ├─ processed/ # feature, score, portfolio, guard, ensemble 結果
-│ └─ calendar/ # 祝日・macro event カレンダー
+│   ├─ raw/              # 日次価格パネル（約94銘柄）
+│   ├─ processed/
+│   │   ├─ features/     # 特徴量
+│   │   ├─ scores/       # スコア
+│   │   ├─ portfolio/    # ポートフォリオ・日次リターン
+│   │   ├─ guards/       # EventGuard / STOP regime
+│   │   └─ stop_regime_plots/ # STOPタイムライン・戦略比較図
+│   └─ calendar/         # 祝日・macro event カレンダー（event01）
 │
 ├─ scripts/
-│ ├─ build_features.py
-│ ├─ scoring_engine.py
-│ ├─ build_portfolio.py
-│ ├─ event_guard.py
-│ ├─ paper_trade.py
-│ ├─ run_single_horizon.py # H1〜H120 ラダーBT
-│ ├─ compare_ladder_vs_baseline.py
-│ ├─ calc_alpha_beta.py # relative α算出
-│ └─ ...
+│   ├─ build_features.py          # 特徴量生成
+│   ├─ scoring_engine.py          # スコアリングエンジン
+│   ├─ build_portfolio.py         # 日次ポートフォリオ構築
+│   ├─ event_guard.py             # EventGuard v1.1
+│   ├─ paper_trade.py             # バックテスト（Return標準化）
+│   ├─ run_single_horizon.py      # H1〜H120 ラダーBT
+│   ├─ compare_ladder_vs_baseline.py
+│   ├─ calc_alpha_beta.py         # relative α算出
+│   ├─ eval_stop_regimes.py       # STOP Regime + Plan A/B 評価
+│   └─ ...
 │
-├─ features/ # feature builder modules
-├─ models/ # regime 判定（PCA/HMM）（将来）
-├─ research/ # notebooks / 分析
-└─ exec/ # 実行・デプロイ用
+├─ features/   # feature builder modules
+├─ models/     # Regime 判定（PCA/HMM など、将来実装）
+├─ research/   # notebooks / 分析
+└─ exec/       # 実行・デプロイ用スクリプト
+🧪 実装状況スナップショット（Ver 2.4 / 2025-12）
+🎯 今回アップデートのハイライト（8th → 13th commit）
+8th_commit
 
-yaml
+EventGuard v1.1
+
+must-kill イベント（FOMC / CPI / 雇用統計 / BOJ / SQ / 決算）の体系化
+
+9th_commit
+
+全モジュールの Return ベース標準化
+
+calc_alpha_beta.py による relative α / β分離基盤
+
+10th_commit
+
+ラダー方式（non-overlap horizon） の本格導入
+
+H1〜H120 の全ホライゾン比較 → H60/H90/H120 コア化
+
+11th〜13th_commit
+
+STOP Regime（中期下落検知ロジック）の実装
+
+インバースETF/キャッシュを用いた Plan A / Plan B の比較
+
+ベータに引きずられる負け（特に 2018, 2022 年）の抑制ロジックを確立
+
+以下、モジュールごとに概要を整理する。
+
+✅ EventGuard v1.1（8th_commit）
+役割
+「1日レベルのギャップ・イベントリスク」を遮断するガードレイヤー。
+
+決算ギャップ・macroイベント・WE跨ぎ（Fri→Mon）を統合管理。
+
+主な機能
+must-kill イベント階層化
+
+優先1：Macro ボライベント（FOMC / CPI / 雇用統計 / BOJ / メジャーSQ）
+
+優先2：決算ギャップリスク
+
+優先3：WE跨ぎ（Friday→Monday ギャップ）
+
+EventGuard クラス API
+
+get_excluded_symbols(date)
+
+get_hedge_ratio(date)
+
+inverse_symbol
+
+decision_date (T-1)
+
+trading_date (T)
+
+ヘッジタイミングの標準化
+
+前日引けでヘッジ構築 → 当日引けで解消
+
+daily_portfolio_guarded.parquet に
+hedge_ratio, inverse_symbol, decision_date, trading_date を記録。
+
+→ event01（カレンダー情報）の parquet 化により、
+決算除外＋macroヘッジの自動運転が可能な状態まで到達。
+
+✅ Return標準化・α/β分離（9th_commit）
+paper_trade v2：Returnベースへの完全統一
+出力を PnL ではなく Return に統一：
+
+daily_return
+
+daily_return_alpha
+
+daily_return_hedge
+
+equity
+
+drawdown
+
+→ ALPHAERS 他ストラテジー（forex, future, parity, crypto 等）との
+アンサンブル互換性（合成・比較）が確立。
+
+calc_alpha_beta v2：relative α の可視化
+ポートフォリオ CC return
+
+TOPIX CC return
+
+relative α（日次差分）を一括計算。
+
+→ β 要素を完全に切り離した 純粋なαの測定基盤 を確立。
+　equity01 の改善は、**「αを伸ばすか・βを抑えるか」**で議論可能になった。
+
+✅ ラダー方式（non-overlap horizon）（10th_commit）
+従来の問題：overlapping horizon の構造的欠陥
+同一シグナル日に同一銘柄が複数ホライゾンで重複
+
+α の過大評価
+
+ノイズの増幅
+
+実運用再現性の低下
+
+→ クオンツとしては致命的なバイアス のため、構造から見直し。
+
+解決：完全ラダー方式の導入
+実装済ホライゾン：
+
+H1 / H5 / H10 / H20 / H60 / H90 / H120
+
+それぞれについて
+
+非ラダー（従来）
+
+ラダー（non-overlap）
+
+を比較し、Sharpe / α / MaxDD を比較。
+
+主要ホライゾン別の知見（要約）
+Horizon	概要
+H1	ラダー化でαが大きく減衰。過大評価が顕著 → ウェイト縮小。
+H5	良好。曜日効果の残課題あり。補助ホライゾン候補。
+H10	安定。H1 とセットで低比率採用。
+H20	ラダー版でやや弱体化 → 使用ウェイトを抑制。
+H60	ラダー版が Sharpe・累積とも大幅改善。
+H90	最強クラス。Sharpe ≒ 0.73、相対α +130%。
+H120	H90 に次ぐ強さ。Sharpe ≒ 0.72、相対α +123%。
+
+結論：アンサンブル採用ホライゾン
+グループ	ホライゾン	役割・方針
+コア採用	H60 / H90 / H120	α源泉の主力。Sharpe > 0.70 クラス。
+サブ採用	H5 / H10	週内効果を補完するため少量採用。
+抑制	H1 / H20	ノイズ多め。ウェイト小さく限定利用。
+
+→ 「安定性＋再現性＋汎用性」が大幅に改善。
+　後続の Multi-Horizon Ensemble の土台が完成。
+
+✅ STOP Regime & Plan A/B（11th〜13th_commit）
+目的
+「ベータに引きずられて負ける年（2018, 2022）をどう抑えるか」
+
+を、ルールベースで制御するレイヤー。
+
+STOP0
+
+ポジションをゼロ（ノーポジ）にする単純STOP
+
+Plan A
+
+インバースETF（TOPIXベア）を用いた 弱ショートベータ戦略
+
+Plan B
+
+キャッシュ（現金化）を併用する 保守的ベータ縮小戦略
+
+STOP シグナルの定義（初期版）
+eval_stop_regimes.py にて：
+
+cross4 の 60日 / 120日ローリングリターン を用いて
+「中期的な下落局面」を検知。
+
+サンプル全体での STOP 期間：
+
+60d: 286日（全体の 11.8%）
+
+120d: 224日（全体の 9.3%）
+
+→ 過度な頻度ではなく、「明らかな調整局面」で点灯している。
+
+STOP0（ノーポジ戦略）の評価
+Baseline cross4
+
+累積 +269% / 年率 +14.6% / MaxDD -32.7%
+
+STOP0 60d
+
+累積 +216% / 年率 +12.7% / MaxDD -19.8%
+
+STOP0 120d
+
+年率 +9.8% / MaxDD -25.7%
+
+示唆：
+
+ドローダウン改善は大きいが、
+リターン側の犠牲も大きく、旗艦としては物足りない。
+
+「キャピタル保全を最優先するモード」の fallback 戦略として有用。
+
+Plan A：STOP中「cross4 75% + inverse 25%」
+最終的に採用候補とした構造：
+
+STOP期間 外：cross4 100%
+
+STOP期間 中：cross4 75% + TOPIXインバース 25%
+（合計エクスポージャは常に 100%）
+
+→ ベータを完全に中立にするのではなく、
+　「やや弱いロングベータ」まで抑制するイメージ。
+
+Plan A 60d（メイン候補）の結果：
+
+累積：+456%
+
+年率：+19.6%（cross4: +15.0%）
+
+年率α：+9.78%（cross4: +5.17%）
+
+αシャープ：1.05（cross4: 0.74）
+
+MaxDD：-21.8%（cross4: -32.7%）
+
+年間勝率：90%
+
+Plan A 120d：
+
+年率 +17.7% / 年率α +8.12% / αシャープ 0.78 / MaxDD -27.6%
+
+→ リスクを大きく抑えながら、リターンとαをむしろ押し上げる
+　バランスの良いストラテジーとなっている。
+
+Plan B：STOP中「キャッシュ 50%」
+構成：
+
+STOP期間外：cross4 100%
+
+STOP期間中：cross4 50% + cash 50%
+
+Plan B 60d：
+
+累積 +248% / 年率 +13.9%
+
+年率α +4.17% / αシャープ 0.86
+
+MaxDD -21.1%
+
+Plan B 120d：
+
+年率 +12.7% / MaxDD -27.9% / αシャープ 0.41
+
+→
+
+ロジックが非常にわかりやすい
+
+ベータ縮小効果が明確
+という意味で、ディフェンシブ運用時のバックアップ STOP 戦略として有効。
+
+STOP Regime レイヤーの位置付け
+Plan A 60d
+→ equity01 の 標準 STOP ガード候補（本線）
+
+Plan B 60d
+→ より保守的な運用モード時の オプションガード
+
+今後は
+
+期間分割（2016–2019 / 2020–2025）による In-Sample / OOS 検証
+
+STOP中ウェイト（90/10, 80/20, 70/30 など）のロバスト性テスト
+
+コスト・スプレッド・指数乖離を加味した実運用レベルのシミュレーション
+
+を通して、ALPHAERS 全体の標準レイヤーとして確定させていく。
+
+📌 現在までに完成している要素（2025-12）
+94銘柄ユニバース（流動性上位約20％）
+
+parquet データ基盤
+
+Feature Builder（ret / vol / ADV / heat_flag など）
+
+Scoring Engine v1.1（サイズバケット正規化）
+
+EventGuard v1.1（macro / 決算 / WE跨ぎ）
+
+daily_portfolio_guarded 出力
+
+paper_trade v2（Return 統一）
+
+Ladder Backtest（H1〜H120）
+
+calc_alpha_beta（relative α）
+
+STOP Regime 基盤（STOP0 / Plan A / Plan B）
+
+STOP timeline & strategy comparison plots
+
+🔮 今後のロードマップ（2026 まで）
+🟣 Multi-Horizon Ensemble（次フェーズ）
+採用ホライゾン：H60 / H90 / H120（コア）＋ H5/H10（サブ）
+
+重み付け例：
+
+text
 コードをコピーする
+final_weight
+  = w_H60 * a
+  + w_H90 * b
+  + w_H120 * c
+  + small_mix(H5, H10)
+a, b, c は Sharpe / α / MaxDD に基づく最適化も視野。
 
----
+🟣 パラメータアンサンブル（zscore × score）
+スコアリングの二本立て：
 
-# 🧪 実装状況（Ver 2.3 / 2025-12）
+zscore ベース
 
-## 🎯 **今回のハイライト（8th → 9th → 10th commit）**
+生スコア / 別指標ベース
 
----
+合成イメージ：
 
-# ✅ **10th_commit（最新）**  
-## 🟦 **ラダー方式（non-overlap horizon）の採用と全ホライゾン解析**
-
-### 🔥 問題：overlapping horizon の構造的欠陥  
-従来の H1/H3/H5/H10… は
-
-- 同じ日付に同銘柄のシグナルが複数重複  
-- αが過大評価される  
-- ノイズが増幅  
-- 実運用再現性が低い
-
-という、クオンツ戦略では致命的なバイアスを生んでいた。
-
----
-
-## 🔥 解決：**完全ラダー方式（non-overlap horizon）を導入**
-
-### 実装済ホライゾン
-- **H1 / H5 / H10 / H20 / H60 / H90 / H120**
-
-### 結果：全ホライゾンで **非ラダー vs ラダー** の比較  
-特に **H60 / H90 / H120** が圧倒的に優秀。
-
----
-
-## 🔥 パフォーマンス総括（抜粋）
-
-### **H90（最強）**
-- Port累積：**+269%**（非ラダー +215% を圧倒）
-- Sharpe：**0.733**
-- relative α：**+130%**
-
-### **H120**
-- Port累積：+262%
-- Sharpe：0.718  
-- relative α：+123%
-
-### **H60**
-- Port累積：+259%
-- Sharpe：0.718  
-- relative α：+120%
-
----
-
-## 🔧 **結論：アンサンブル採用ホライゾン**
-| グループ | ホライゾン | 役割 |
-|---------|-------------|-------|
-| **コア採用** | **H60 / H90 / H120（ラダー）** | α源泉の主力。Sharpe>0.70 |
-| **サブ採用** | H5 / H10（非ラダー） | 週内効果を補完するため少量採用 |
-| **抑制** | H1 / H20 | ノイズ多いためウェイト縮小 |
-
-これにより **安定性＋再現性＋汎用性** が大幅改善。
-
----
-
-# ✅ **9th_commit（α/β 分離・Return標準化）**
-
-### ✔ paper_trade 出力を Return に統一  
-- daily_return  
-- daily_return_alpha  
-- daily_return_hedge  
-- equity  
-- drawdown  
-
-ALPHAERS の他ストラテジーとの **アンサンブル互換性**が確立。
-
----
-
-### ✔ calc_alpha_beta v2  
-- Port CC return  
-- TOPIX CC return  
-- relative α  
-- β要素を完全切り離し可能に。
-
----
-
-# ✅ **8th_commit（EventGuard v1.1）**
-
-### ✔ must-kill イベントの体系化  
-- FOMC  
-- CPI  
-- 雇用統計  
-- BOJ（決定会合＋会見）  
-- メジャーSQ  
-
-**前日引けヘッジ → 当日引け解消** が標準動作。
-
-### ✔ 決算除外ロジック（date-based）  
-event01（カレンダー）から自動フィードされる設計。
-
----
-
-# ✔ 完成済（2025-12）
-
-- 94銘柄ユニバース（流動性上位20%）
-- parquetデータ基盤
-- Feature Builder（ret/vol/ADV/heat_flag）
-- Scoring Engine v1.1（サイズバケット正規化）
-- EventGuard v1.1
-- daily_portfolio_guarded 出力完成
-- PaperTrade v2（Return に統一）
-- Ladder Backtest（H1〜H120）
-- calc_alpha_beta（relative α）
-
----
-
-# ⏳ 開発中（2026Q1 完成予定）
-
-## 🔵 EventGuard v0.3  
-- 225先物（5分変動）  
-- USDJPY（σ距離）  
-- VIX  
-- ニュース速報 event02  
-- VAR連動リスク調整
-
-## 🔵 Intraweek Overlay  
-- 木→金、金→月の縮小ロジック  
-- 月曜リスクの軽減
-
-## 🔵 β制御  
-- ETF階段（β 0.6 / 0.4 / 0.2）  
-- ボラターゲティング
-
----
-
-# 🔮 今後のロードマップ（2026）
-
-## 🟣 Multi-Horizon Ensemble（次フェーズ）
-final_w = a·H60 + b·H90 + c·H120 + ε(H5,H10)
-
-shell
+text
 コードをコピーする
+w_final = (1 - λ) * w_z + λ * w_s
+トレンド相場：λ を大きく（score 強め）
 
-## 🟣 パラメータアンサンブル
-w_final = (1-λ)·w_zscore + λ·w_score
+ノイズ相場：λ を小さく（zscore・リバランス抑制）
 
-yaml
+→ Regime 判定と連動させることで、動的パラメータアンサンブルへ拡張。
+
+🟣 Regime 判定（2026Q2 〜）
+Breadth PCA（市場内部の広がり・偏り）
+
+HMM / Sticky-HMM によるレジーム分類
+
+Regime に応じた重み調整：
+
+βレバー（Plan A/B 強度）
+
+ホライゾンウェイト（H60/H90/H120の配分）
+
+λ（zscore vs score）
+
+🟣 EventGuard v0.3 以降
+225先物（5分変動）
+
+USDJPY（σ距離）
+
+VIX
+
+ニュース速報（event02）＋ LLM 要約評価
+
+簡易 VAR によるリスク上限
+
+📂 実行コマンド（標準フロー）
+bash
 コードをコピーする
-
-## 🟣 Regime 判定（2026Q2）
-- Breadth PCA  
-- HMM / Sticky-HMM  
-- Regime-based weight multipliers  
-
----
-
-# 📂 実行コマンド（標準フロー）
-
+# 特徴量生成
 python scripts/build_features.py
+
+# ポートフォリオ構築（単一ホライゾン）
 python scripts/build_portfolio.py
-python scripts/run_single_horizon.py 60 # 例
+
+# 単一ホライゾン・ラダーバックテスト
+python scripts/run_single_horizon.py 60   # 例: H60
+
+# ペーパートレード（Return出力）
 python scripts/paper_trade.py
+
+# α/β 分離・relative α 計算
 python scripts/calc_alpha_beta.py
 
-yaml
-コードをコピーする
+# STOP Regime + Plan A/B 評価
+python scripts/eval_stop_regimes.py
+📝 所感（Ver 2.4 時点）
+10th_commit までで 「再現性あるα抽出」 の土台が整い、
 
----
+11th〜13th_commit で 「いつフルベータを取らないか」 というレジーム制御が加わった。
 
-# 📈 スナップショット（H90 ラダー）
+特に Plan A（STOP中 75% cross4 + 25% inverse）は、
 
-- 年率: **14.56%**  
-- Sharpe: **0.733**  
-- 最大DD: -35.2%  
-- α累積: **+130%**
+ドローダウンを 10pt 以上圧縮しつつ
 
-> EventGuard v1.1 稼働時  
-> 実運用想定に耐える戦略クオリティに到達。
+年率リターンと年率αを同時に押し上げる
 
----
+という、戦略として非常に魅力的なポジションを獲得している。
 
-# 🛡 EventGuard（v1.1 → v0.3）
+今後、ホライゾンアンサンブルとパラメータアンサンブル、Regime 判定を統合し、
+STOP Regime / EventGuard を上位レイヤーとして噛ませることで、
 
-### 現行（v1.1）
-- 決算除外  
-- macroイベントヘッジ  
-- hedge_ratio  
-- decision/trading date
+2026 Q1〜Q2 に「ALPHAERS 初期版」の中核エクイティモジュール
 
-### v0.3（開発中）
-- ニュースイベント（event02）  
-- 225先物 × USDJPY  
-- LLM 要約判定  
-- σ距離ベースの risk-off detection
+として完成させるロードマップが、かなり現実的なフェーズに入った。
 
----
-
-# 🔍 技術スタック
-- ChatGPT（設計・仕様・研究）
-- Cursor Pro（実装）
-- Claude（コード監査）
-- Pandas / PyArrow
-- GitHub（versioning）
-
----
-
-# 📮 連絡先
-本プロジェクトは個人研究目的で進行しています。  
-issue / PR は内部フェーズに応じて対応予定。
+Prepared by equity01 / Strategy Core Layer
+Research Plan v2.4（8th ～ 13th commit を反映）
