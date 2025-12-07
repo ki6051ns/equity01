@@ -19,12 +19,35 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+import warnings
+warnings.filterwarnings('ignore')
+
 import pandas as pd
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")  # 非対話的バックエンド
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+
+# 日本語フォント設定
+import platform
+import matplotlib.font_manager as fm
+
+# OSに応じた日本語フォントを設定
+system = platform.system()
+if system == 'Windows':
+    # Windows環境: MS Gothic, Yu Gothicなどを試す
+    jp_fonts = ['MS Gothic', 'Yu Gothic', 'Meiryo', 'MS PGothic']
+    for font in jp_fonts:
+        if font in [f.name for f in fm.fontManager.ttflist]:
+            plt.rcParams['font.family'] = font
+            break
+    else:
+        plt.rcParams['font.family'] = 'DejaVu Sans'
+elif system == 'Darwin':  # macOS
+    plt.rcParams['font.family'] = 'Hiragino Sans'
+else:  # Linux
+    plt.rcParams['font.family'] = 'Noto Sans CJK JP'
 
 DATA_DIR = Path("data/processed")
 OUTPUT_DIR = Path("data/processed/stop_regime_plots")
