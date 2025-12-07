@@ -18,6 +18,17 @@ def main():
 
     tickers = df["ticker"].dropna().unique()
 
+    # 追加ティッカー（ETF/インバース）
+    additional_tickers = [
+        "1469.T",  # Japan Minimum Volatility ETF（最小分散）
+        "1569.T",  # TOPIX Inverse（-1x）
+        "1356.T",  # TOPIX Double Inverse（-2x）
+    ]
+    
+    # 重複を避けて追加（ユニーク化）
+    tickers = pd.Index(tickers).union(pd.Index(additional_tickers)).unique()
+    tickers = sorted(tickers)  # ソートして一貫性を保つ
+
     print(f"取得対象銘柄数: {len(tickers)}")
     print("例:", tickers[:10])
 
