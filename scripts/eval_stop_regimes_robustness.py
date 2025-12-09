@@ -196,6 +196,181 @@ def compute_strategy_returns(
         return pd.Series(np.where(stop_cond, ret_stop, port_ret.values), index=port_ret.index)
 
 
+def analyze_stop_duration_distribution(stop_cond: pd.Series) -> Dict:
+    """
+    STOP期間の連続日数分布を分析
+    
+    Parameters
+    ----------
+    stop_cond : pd.Series
+        STOP条件のブールSeries
+    
+    Returns
+    -------
+    Dict
+        連続日数の統計情報と分布データを含む辞書
+    """
+    # STOP期間の連続日数を計算
+    stop_cond_int = stop_cond.astype(int)
+    
+    # 連続するTrueの期間を検出
+    durations = []
+    current_duration = 0
+    
+    for val in stop_cond_int.values:
+        if val == 1:  # STOP期間中
+            current_duration += 1
+        else:  # STOP期間外
+            if current_duration > 0:
+                durations.append(current_duration)
+                current_duration = 0
+    
+    # 最後がSTOP期間で終わる場合
+    if current_duration > 0:
+        durations.append(current_duration)
+    
+    durations = np.array(durations) if durations else np.array([0])
+    
+    # 統計情報
+    stats = {
+        "total_stop_days": stop_cond.sum(),
+        "total_periods": len(durations),
+        "mean_duration": durations.mean() if len(durations) > 0 else 0.0,
+        "median_duration": np.median(durations) if len(durations) > 0 else 0.0,
+        "std_duration": durations.std() if len(durations) > 0 else 0.0,
+        "min_duration": durations.min() if len(durations) > 0 else 0,
+        "max_duration": durations.max() if len(durations) > 0 else 0,
+        "durations": durations,
+        "stop_rate": stop_cond.sum() / len(stop_cond) * 100 if len(stop_cond) > 0 else 0.0,
+    }
+    
+    return stats
+
+
+def plot_stop_duration_distribution(stop_cond: pd.Series, output_path: Path, title: str = "STOP期間の連続日数分布"):
+    """
+    STOP期間の連続日数分布を可視化
+    
+    Parameters
+    ----------
+    stop_cond : pd.Series
+        STOP条件のブールSeries
+    output_path : Path
+        出力ファイルパス
+    title : str
+        グラフタイトル
+    """
+    stats = analyze_stop_duration_distribution(stop_cond)
+    durations = stats["durations"]
+    
+    if len(durations) == 0 or durations.max() == 0:
+        print(f"[WARN] STOP期間がありません。グラフをスキップします。")
+        return
+    
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # ヒストグラム
+    ax = axes[0, 0]
+    ax.hist(durations, bins=min(50, len(np.unique(durations))), edgecolor='black', alpha=0.7, color='red')
+    ax.axvline(stats["mean_duration"], color='blue', linestyle='--', linewidth=2, label=f'平均: {stats["mean_duration"]:.1f}日')
+    ax.axvline(stats["median_duration"], color='green', linestyle='--', linewidth=2, label=f'中央値: {stats["median_duration"]:.1f}日')
+    ax.set_xlabel("連続日数")
+    ax.set_ylabel("頻度")
+    ax.set_title(f"{title} - ヒストグラム", fontweight="bold")
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    # 累積分布
+    ax = axes[0, 1]
+    sorted_durations = np.sort(durations)
+    cumulative = np.arange(1, len(sorted_durations) + 1) / len(sorted_durations) * 100
+    ax.plot(sorted_durations, cumulative, linewidth=2, color='red')
+    ax.axvline(stats["mean_duration"], color='blue', linestyle='--', linewidth=1, alpha=0.5)
+    ax.axvline(stats["median_duration"], color='green', linestyle='--', linewidth=1, alpha=0.5)
+    ax.set_xlabel("連続日数")
+    ax.set_ylabel("累積分布 (%)")
+    ax.set_title(f"{title} - 累積分布", fontweight="bold")
+    ax.grid(True, alpha=0.3)
+    
+    # 箱ひげ図
+    ax = axes[1, 0]
+    bp = ax.boxplot([durations], vert=True, patch_artist=True, labels=['STOP期間'])
+    bp['boxes'][0].set_facecolor('lightcoral')
+    ax.set_ylabel("連続日数")
+    ax.set_title(f"{title} - 箱ひげ図", fontweight="bold")
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    # 統計情報テーブル
+    ax = axes[1, 1]
+    ax.axis('off')
+    stats_text = f"""
+    統計情報
+    
+    総STOP日数: {stats['total_stop_days']:.0f}日
+    STOP率: {stats['stop_rate']:.2f}%
+    総STOP期間数: {stats['total_periods']:.0f}回
+    
+    平均連続日数: {stats['mean_duration']:.2f}日
+    中央値連続日数: {stats['median_duration']:.2f}日
+    標準偏差: {stats['std_duration']:.2f}日
+    
+    最小連続日数: {stats['min_duration']:.0f}日
+    最大連続日数: {stats['max_duration']:.0f}日
+    
+    25%分位: {np.percentile(durations, 25):.1f}日
+    75%分位: {np.percentile(durations, 75):.1f}日
+    """
+    ax.text(0.1, 0.5, stats_text, fontsize=12, verticalalignment='center',
+            family='monospace', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.tight_layout()
+    fig.savefig(output_path, dpi=150, bbox_inches='tight')
+    print(f"[INFO] Saved STOP duration distribution to {output_path}")
+    plt.close(fig)
+
+
+def print_stop_duration_statistics(stop_cond: pd.Series, label: str = ""):
+    """
+    STOP期間の連続日数統計を表示
+    
+    Parameters
+    ----------
+    stop_cond : pd.Series
+        STOP条件のブールSeries
+    label : str
+        ラベル（表示用）
+    """
+    stats = analyze_stop_duration_distribution(stop_cond)
+    durations = stats["durations"]
+    
+    if len(durations) == 0 or durations.max() == 0:
+        print(f"\n{label}STOP期間がありません。")
+        return
+    
+    print(f"\n{label}【STOP期間の連続日数分布】")
+    print("-" * 80)
+    print(f"  総STOP日数: {stats['total_stop_days']:.0f}日")
+    print(f"  STOP率: {stats['stop_rate']:.2f}%")
+    print(f"  総STOP期間数: {stats['total_periods']:.0f}回")
+    print(f"\n  平均連続日数: {stats['mean_duration']:.2f}日")
+    print(f"  中央値連続日数: {stats['median_duration']:.2f}日")
+    print(f"  標準偏差: {stats['std_duration']:.2f}日")
+    print(f"\n  最小連続日数: {stats['min_duration']:.0f}日")
+    print(f"  最大連続日数: {stats['max_duration']:.0f}日")
+    print(f"  25%分位: {np.percentile(durations, 25):.1f}日")
+    print(f"  75%分位: {np.percentile(durations, 75):.1f}日")
+    
+    # 連続日数の分布（区間別）
+    print(f"\n  連続日数分布:")
+    bins = [1, 5, 10, 20, 30, 60, 90, 120, float('inf')]
+    bin_labels = ["1日", "2-5日", "6-10日", "11-20日", "21-30日", "31-60日", "61-90日", "91-120日", "121日以上"]
+    for i in range(len(bins) - 1):
+        count = ((durations >= bins[i]) & (durations < bins[i+1])).sum()
+        pct = count / len(durations) * 100 if len(durations) > 0 else 0
+        if count > 0:
+            print(f"    {bin_labels[i]}: {count:3d}回 ({pct:5.1f}%)")
+
+
 def compute_performance_metrics(ret_series: pd.Series, tpx_ret: pd.Series) -> Dict:
     """パフォーマンス指標を計算"""
     common_index = ret_series.index.intersection(tpx_ret.index)
@@ -313,9 +488,15 @@ def test_1_oos_split(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd.Series
     # IS期間の累積リターン
     ax = axes[0, 0]
     dates_is = port_ret[is_mask].index
+    stop_cond_is = stop_cond_full[is_mask]
     for name in strategies.keys():
         cum_ret = (1 + strategies[name][is_mask]).cumprod()
         ax.plot(dates_is, (cum_ret - 1) * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け
+    if stop_cond_is.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates_is, y_min, y_max, where=stop_cond_is.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("IS期間: 累積リターン (2016-2019)", fontweight="bold")
     ax.set_ylabel("Cumulative Return (%)")
     ax.legend()
@@ -324,9 +505,15 @@ def test_1_oos_split(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd.Series
     # OOS期間の累積リターン
     ax = axes[0, 1]
     dates_oos = port_ret[oos_mask].index
+    stop_cond_oos = stop_cond_full[oos_mask]
     for name in strategies.keys():
         cum_ret = (1 + strategies[name][oos_mask]).cumprod()
         ax.plot(dates_oos, (cum_ret - 1) * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け
+    if stop_cond_oos.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates_oos, y_min, y_max, where=stop_cond_oos.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("OOS期間: 累積リターン (2020-2025)", fontweight="bold")
     ax.set_ylabel("Cumulative Return (%)")
     ax.legend()
@@ -338,6 +525,11 @@ def test_1_oos_split(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd.Series
         cum_ret = (1 + strategies[name][is_mask]).cumprod()
         dd = cum_ret / cum_ret.cummax() - 1
         ax.plot(dates_is, dd * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け
+    if stop_cond_is.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates_is, y_min, y_max, where=stop_cond_is.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("IS期間: ドローダウン (2016-2019)", fontweight="bold")
     ax.set_ylabel("Drawdown (%)")
     ax.legend()
@@ -349,6 +541,11 @@ def test_1_oos_split(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd.Series
         cum_ret = (1 + strategies[name][oos_mask]).cumprod()
         dd = cum_ret / cum_ret.cummax() - 1
         ax.plot(dates_oos, dd * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け
+    if stop_cond_oos.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates_oos, y_min, y_max, where=stop_cond_oos.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("OOS期間: ドローダウン (2020-2025)", fontweight="bold")
     ax.set_ylabel("Drawdown (%)")
     ax.legend()
@@ -359,6 +556,28 @@ def test_1_oos_split(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd.Series
     fig.savefig(fig_path, dpi=150, bbox_inches='tight')
     print(f"\n[INFO] Saved to {fig_path}")
     plt.close(fig)
+    
+    # STOP期間の連続日数分布分析
+    print_stop_duration_statistics(stop_cond_full, "【全期間】")
+    print_stop_duration_statistics(stop_cond_full[is_mask], "【IS期間】")
+    print_stop_duration_statistics(stop_cond_full[oos_mask], "【OOS期間】")
+    
+    # 可視化
+    plot_stop_duration_distribution(
+        stop_cond_full,
+        OUTPUT_DIR / "test1_stop_duration_distribution.png",
+        "STOP期間の連続日数分布（全期間）"
+    )
+    plot_stop_duration_distribution(
+        stop_cond_full[is_mask],
+        OUTPUT_DIR / "test1_stop_duration_distribution_is.png",
+        "STOP期間の連続日数分布（IS期間）"
+    )
+    plot_stop_duration_distribution(
+        stop_cond_full[oos_mask],
+        OUTPUT_DIR / "test1_stop_duration_distribution_oos.png",
+        "STOP期間の連続日数分布（OOS期間）"
+    )
     
     # 合格基準チェック
     print("\n【合格基準チェック】")
@@ -416,6 +635,11 @@ def test_2_weight_robustness(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: p
     for name, r in results.items():
         cum_ret = (1 + r["returns"]).cumprod()
         ax.plot(dates, (cum_ret - 1) * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け
+    if stop_cond.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates, y_min, y_max, where=stop_cond.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("累積リターン比較", fontweight="bold")
     ax.set_ylabel("Cumulative Return (%)")
     ax.legend()
@@ -427,6 +651,11 @@ def test_2_weight_robustness(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: p
         cum_ret = (1 + r["returns"]).cumprod()
         dd = cum_ret / cum_ret.cummax() - 1
         ax.plot(dates, dd * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け
+    if stop_cond.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates, y_min, y_max, where=stop_cond.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("ドローダウン比較", fontweight="bold")
     ax.set_ylabel("Drawdown (%)")
     ax.legend()
@@ -472,6 +701,14 @@ def test_2_weight_robustness(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: p
     fig.savefig(fig_path, dpi=150, bbox_inches='tight')
     print(f"\n[INFO] Saved to {fig_path}")
     plt.close(fig)
+    
+    # STOP期間の連続日数分布分析
+    print_stop_duration_statistics(stop_cond, "【テスト②】")
+    plot_stop_duration_distribution(
+        stop_cond,
+        OUTPUT_DIR / "test2_stop_duration_distribution.png",
+        "STOP期間の連続日数分布（ウェイトロバスト性テスト）"
+    )
 
 
 def test_3_with_costs(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd.Series):
@@ -535,6 +772,11 @@ def test_3_with_costs(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd.Serie
         if name in strategies:
             cum_ret = (1 + strategies[name]).cumprod()
             ax.plot(dates, (cum_ret - 1) * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け
+    if stop_cond.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates, y_min, y_max, where=stop_cond.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("コスト込み vs コストなし: 累積リターン", fontweight="bold")
     ax.set_ylabel("Cumulative Return (%)")
     ax.legend()
@@ -547,6 +789,11 @@ def test_3_with_costs(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd.Serie
             cum_ret = (1 + strategies[name]).cumprod()
             dd = cum_ret / cum_ret.cummax() - 1
             ax.plot(dates, dd * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け
+    if stop_cond.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates, y_min, y_max, where=stop_cond.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("コスト込み vs コストなし: ドローダウン", fontweight="bold")
     ax.set_ylabel("Drawdown (%)")
     ax.set_xlabel("Date")
@@ -655,10 +902,16 @@ def test_4_episode_analysis(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd
         if mask.sum() == 0:
             continue
         dates = port_ret[mask].index
+        stop_cond_event = stop_cond[mask]
         cum_cross4 = (1 + cross4_base[mask]).cumprod()
         cum_planA = (1 + planA_base[mask]).cumprod()
         ax.plot(dates, (cum_cross4 - 1) * 100, label=f"{event_name} (cross4)", linewidth=2, alpha=0.6, linestyle='--')
         ax.plot(dates, (cum_planA - 1) * 100, label=f"{event_name} (Plan A)", linewidth=2, alpha=0.8)
+        # STOP期間（インバースポジション期間）を網掛け
+        if stop_cond_event.any():
+            y_min, y_max = ax.get_ylim()
+            ax.fill_between(dates, y_min, y_max, where=stop_cond_event.values, 
+                           alpha=0.15, color='red', label='STOP期間（インバースポジション）' if event_name == list(events.keys())[0] else '', interpolate=True)
     ax.set_title("イベント期間の累積リターン", fontweight="bold")
     ax.set_ylabel("Cumulative Return (%)")
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -733,6 +986,11 @@ def test_5_simple_stop(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd.Seri
     for name, ret_series in strategies.items():
         cum_ret = (1 + ret_series).cumprod()
         ax.plot(dates, (cum_ret - 1) * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け（現行STOP条件）
+    if stop_cond_complex.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates, y_min, y_max, where=stop_cond_complex.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("現行STOP vs 単純STOP: 累積リターン", fontweight="bold")
     ax.set_ylabel("Cumulative Return (%)")
     ax.legend()
@@ -744,6 +1002,11 @@ def test_5_simple_stop(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd.Seri
         cum_ret = (1 + ret_series).cumprod()
         dd = cum_ret / cum_ret.cummax() - 1
         ax.plot(dates, dd * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け（現行STOP条件）
+    if stop_cond_complex.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates, y_min, y_max, where=stop_cond_complex.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("現行STOP vs 単純STOP: ドローダウン", fontweight="bold")
     ax.set_ylabel("Drawdown (%)")
     ax.set_xlabel("Date")
@@ -847,6 +1110,11 @@ def test_6_final_assessment(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd
     for name, ret_series in strategies.items():
         cum_ret = (1 + ret_series).cumprod()
         ax.plot(dates, (cum_ret - 1) * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け
+    if stop_cond.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates, y_min, y_max, where=stop_cond.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("全期間: 累積リターン", fontweight="bold")
     ax.set_ylabel("Cumulative Return (%)")
     ax.legend()
@@ -855,10 +1123,16 @@ def test_6_final_assessment(port_ret: pd.Series, tpx_ret: pd.Series, inv_ret: pd
     # OOS期間の累積リターン
     ax = axes[0, 1]
     dates_oos = port_ret[oos_mask].index
+    stop_cond_oos = stop_cond[oos_mask]
     for name, ret_series in strategies.items():
         ret_oos = ret_series[oos_mask]
         cum_ret = (1 + ret_oos).cumprod()
         ax.plot(dates_oos, (cum_ret - 1) * 100, label=name, linewidth=2, alpha=0.8)
+    # STOP期間（インバースポジション期間）を網掛け
+    if stop_cond_oos.any():
+        y_min, y_max = ax.get_ylim()
+        ax.fill_between(dates_oos, y_min, y_max, where=stop_cond_oos.values, 
+                       alpha=0.15, color='red', label='STOP期間（インバースポジション）', interpolate=True)
     ax.set_title("OOS期間: 累積リターン (2020-2025)", fontweight="bold")
     ax.set_ylabel("Cumulative Return (%)")
     ax.legend()
@@ -955,6 +1229,18 @@ def main():
     
     print(f"[INFO] Loaded data: {len(port_ret)} days")
     print(f"  Date range: {port_ret.index.min().date()} ～ {port_ret.index.max().date()}")
+    
+    # 全期間のSTOP期間連続日数分布を分析（全体サマリー）
+    print("\n" + "=" * 80)
+    print("=== STOP期間の連続日数分布分析（全体サマリー） ===")
+    print("=" * 80)
+    stop_cond_full = compute_stop_condition(port_ret, tpx_ret, window=60)
+    print_stop_duration_statistics(stop_cond_full, "")
+    plot_stop_duration_distribution(
+        stop_cond_full,
+        OUTPUT_DIR / "stop_duration_distribution_overall.png",
+        "STOP期間の連続日数分布（全期間）"
+    )
     
     # 各テストを実行
     test_1_oos_split(port_ret, tpx_ret, inv_ret)

@@ -24,6 +24,7 @@ warnings.filterwarnings('ignore')
 
 import pandas as pd
 import numpy as np
+import re
 import matplotlib
 matplotlib.use("Agg")  # 非対話的バックエンド
 import matplotlib.pyplot as plt
@@ -753,6 +754,352 @@ def plot_strategy_comparison(results: dict) -> plt.Figure:
     return fig
 
 
+def load_daily_portfolio_holdings() -> pd.DataFrame:
+    """
+    日次ポートフォリオの保有銘柄データを読み込む
+    
+    Returns
+    -------
+    pd.DataFrame
+        日次ポートフォリオの保有銘柄データ（date, symbol, weight等）
+    """
+    portfolio_paths = [
+        DATA_DIR / "daily_portfolio_guarded.parquet",
+        DATA_DIR / "daily_portfolio.parquet",
+    ]
+    
+    for path in portfolio_paths:
+        if path.exists():
+            try:
+                df = pd.read_parquet(path)
+                
+                # 日付カラムを確認
+                date_col = None
+                for col in ["date", "trade_date", "trading_date"]:
+                    if col in df.columns:
+                        date_col = col
+                        break
+                
+                if date_col is None:
+                    continue
+                
+                df[date_col] = pd.to_datetime(df[date_col])
+                
+                # 必要なカラムを確認
+                required_cols = ["symbol", "weight"]
+                if not all(col in df.columns for col in required_cols):
+                    print(f"[WARN] Required columns not found in {path}: {required_cols}")
+                    continue
+                
+                print(f"[INFO] Loaded portfolio holdings from {path}: {len(df)} rows")
+                print(f"  Date range: {df[date_col].min().date()} ～ {df[date_col].max().date()}")
+                print(f"  Unique dates: {df[date_col].nunique()}")
+                print(f"  Unique symbols: {df['symbol'].nunique()}")
+                
+                return df
+                
+            except Exception as e:
+                print(f"[WARN] Failed to load from {path}: {e}")
+                continue
+    
+    raise FileNotFoundError("日次ポートフォリオデータが見つかりません。")
+
+
+def plot_holdings_scatter(holdings_df: pd.DataFrame, date_col: str, port_ret: pd.Series) -> None:
+    """
+    保有銘柄の散布図を作成
+    - 縦軸: 銘柄コード（4桁数字）
+    - 横軸: 日付
+    - プロットサイズ: ウェイト
+    
+    Parameters
+    ----------
+    holdings_df : pd.DataFrame
+        日次ポートフォリオの保有銘柄データ
+    date_col : str
+        日付カラム名
+    port_ret : pd.Series
+        cross4の日次リターン（日付インデックス）
+    """
+    print("\n【保有銘柄散布図の作成】")
+    
+    # 銘柄コードから4桁数字を抽出（例：7203.T -> 7203）
+    def extract_ticker_number(symbol: str) -> int:
+        """銘柄コードから4桁数字を抽出"""
+        match = re.search(r'(\d{4})', str(symbol))
+        if match:
+            return int(match.group(1))
+        return 0
+    
+    holdings_df = holdings_df.copy()
+    holdings_df['ticker_num'] = holdings_df['symbol'].apply(extract_ticker_number)
+    
+    # 有効な銘柄のみ（4桁数字が抽出できたもの）
+    valid_holdings = holdings_df[holdings_df['ticker_num'] > 0].copy()
+    
+    if len(valid_holdings) == 0:
+        print("[WARN] 有効な銘柄コードが見つかりません。散布図をスキップします。")
+        return
+    
+    # 日付をdatetimeに変換
+    valid_holdings[date_col] = pd.to_datetime(valid_holdings[date_col])
+    
+    # ウェイトを正規化（プロットサイズ用、最小値と最大値を設定）
+    weights = valid_holdings['weight'].values
+    weight_min = weights.min()
+    weight_max = weights.max()
+    
+    # プロットサイズを計算（最小10、最大500）
+    plot_sizes = 10 + (weights - weight_min) / (weight_max - weight_min) * 490 if weight_max > weight_min else np.full(len(weights), 50)
+    
+    # 散布図を作成
+    fig, ax = plt.subplots(figsize=(20, 12))
+    
+    # 日付と銘柄コードのペアでプロット
+    dates = valid_holdings[date_col].values
+    ticker_nums = valid_holdings['ticker_num'].values
+    
+    # 散布図をプロット
+    scatter = ax.scatter(dates, ticker_nums, s=plot_sizes, alpha=0.6, c=weights, 
+                         cmap='viridis', edgecolors='black', linewidths=0.5)
+    
+    # カラーバーを追加（ウェイト）
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('ウェイト', fontsize=12)
+    
+    # 軸ラベルとタイトル
+    ax.set_xlabel('日付', fontsize=12)
+    ax.set_ylabel('銘柄コード（4桁数字）', fontsize=12)
+    ax.set_title('保有銘柄の推移（プロットサイズ=ウェイト）', fontweight="bold", fontsize=14)
+    
+    # グリッド
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    # 日付フォーマット
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    ax.xaxis.set_minor_locator(mdates.MonthLocator((1, 7)))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+    
+    # 縦軸のフォーマット（銘柄コードは整数）
+    ax.yaxis.set_major_locator(plt.MaxNLocator(20))  # 最大20個のティック
+    
+    # 凡例（プロットサイズの説明）
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', 
+               markersize=np.sqrt(10), label=f'最小ウェイト ({weight_min:.4f})'),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', 
+               markersize=np.sqrt(250), label=f'最大ウェイト ({weight_max:.4f})'),
+    ]
+    ax.legend(handles=legend_elements, loc='upper left', fontsize=10)
+    
+    plt.tight_layout()
+    fig_path = OUTPUT_DIR / "holdings_scatter_by_weight.png"
+    fig.savefig(fig_path, dpi=150, bbox_inches='tight')
+    print(f"[INFO] Saved holdings scatter plot to {fig_path}")
+    plt.close(fig)
+    
+    # 統計情報
+    print(f"  プロットされた銘柄数: {valid_holdings['symbol'].nunique()}銘柄")
+    print(f"  プロットされたデータポイント数: {len(valid_holdings)}点")
+    print(f"  ウェイト範囲: {weight_min:.6f} ～ {weight_max:.6f}")
+
+
+def analyze_daily_holdings_turnover(holdings_df: pd.DataFrame, port_ret: pd.Series) -> None:
+    """
+    日次保有銘柄の推移を分析・可視化
+    
+    Parameters
+    ----------
+    holdings_df : pd.DataFrame
+        日次ポートフォリオの保有銘柄データ
+    port_ret : pd.Series
+        cross4の日次リターン（日付インデックス）
+    """
+    print("\n" + "=" * 80)
+    print("=== 日次保有銘柄推移分析 ===")
+    print("=" * 80)
+    
+    # 日付カラムを確認
+    date_col = None
+    for col in ["date", "trade_date", "trading_date"]:
+        if col in holdings_df.columns:
+            date_col = col
+            break
+    
+    if date_col is None:
+        print("[ERROR] 日付カラムが見つかりません")
+        return
+    
+    # 日付でソート
+    holdings_df = holdings_df.sort_values(date_col)
+    
+    # 日次で保有銘柄数を計算
+    daily_counts = holdings_df.groupby(date_col).agg({
+        'symbol': 'count',
+        'weight': 'sum'
+    }).rename(columns={'symbol': 'num_holdings', 'weight': 'total_weight'})
+    
+    # 日次で保有銘柄のリストを取得
+    daily_holdings = holdings_df.groupby(date_col)['symbol'].apply(set).to_dict()
+    
+    # 銘柄の入れ替わり率を計算
+    turnover_rates = []
+    dates = sorted(daily_holdings.keys())
+    
+    for i in range(1, len(dates)):
+        prev_date = dates[i-1]
+        curr_date = dates[i]
+        
+        prev_symbols = daily_holdings[prev_date]
+        curr_symbols = daily_holdings[curr_date]
+        
+        # 共通銘柄数
+        common = len(prev_symbols & curr_symbols)
+        # 前日の銘柄数
+        prev_count = len(prev_symbols)
+        # 当日の銘柄数
+        curr_count = len(curr_symbols)
+        
+        # 入れ替わり率: (新規 + 削除) / 前日銘柄数
+        if prev_count > 0:
+            new_symbols = len(curr_symbols - prev_symbols)
+            removed_symbols = len(prev_symbols - curr_symbols)
+            turnover_rate = (new_symbols + removed_symbols) / prev_count
+        else:
+            turnover_rate = 1.0 if curr_count > 0 else 0.0
+        
+        turnover_rates.append({
+            'date': curr_date,
+            'prev_count': prev_count,
+            'curr_count': curr_count,
+            'common': common,
+            'new': len(curr_symbols - prev_symbols),
+            'removed': len(prev_symbols - curr_symbols),
+            'turnover_rate': turnover_rate,
+        })
+    
+    turnover_df = pd.DataFrame(turnover_rates)
+    
+    # 統計情報を表示
+    print("\n【保有銘柄数の統計】")
+    print(f"  平均保有銘柄数: {daily_counts['num_holdings'].mean():.1f}銘柄")
+    print(f"  中央値保有銘柄数: {daily_counts['num_holdings'].median():.1f}銘柄")
+    print(f"  最小保有銘柄数: {daily_counts['num_holdings'].min():.0f}銘柄")
+    print(f"  最大保有銘柄数: {daily_counts['num_holdings'].max():.0f}銘柄")
+    print(f"  標準偏差: {daily_counts['num_holdings'].std():.1f}銘柄")
+    
+    print("\n【銘柄入れ替わり率の統計】")
+    if len(turnover_df) > 0:
+        print(f"  平均入れ替わり率: {turnover_df['turnover_rate'].mean():.2%}")
+        print(f"  中央値入れ替わり率: {turnover_df['turnover_rate'].median():.2%}")
+        print(f"  最小入れ替わり率: {turnover_df['turnover_rate'].min():.2%}")
+        print(f"  最大入れ替わり率: {turnover_df['turnover_rate'].max():.2%}")
+        print(f"  標準偏差: {turnover_df['turnover_rate'].std():.2%}")
+        
+        # 入れ替わり率の分布
+        print("\n【入れ替わり率の分布】")
+        bins = [0, 0.05, 0.10, 0.20, 0.30, 0.50, 1.0]
+        bin_labels = ["0-5%", "5-10%", "10-20%", "20-30%", "30-50%", "50-100%"]
+        for i in range(len(bins) - 1):
+            count = ((turnover_df['turnover_rate'] >= bins[i]) & (turnover_df['turnover_rate'] < bins[i+1])).sum()
+            pct = count / len(turnover_df) * 100 if len(turnover_df) > 0 else 0
+            if count > 0:
+                print(f"  {bin_labels[i]}: {count:4d}日 ({pct:5.1f}%)")
+    
+    # 可視化
+    fig, axes = plt.subplots(3, 1, figsize=(16, 14))
+    dates_index = pd.to_datetime(turnover_df['date']) if len(turnover_df) > 0 else pd.DatetimeIndex([])
+    
+    # 1. 保有銘柄数の推移
+    ax = axes[0]
+    # daily_countsは既にdate_colがインデックスになっている
+    ax.plot(daily_counts.index, daily_counts['num_holdings'], 
+            linewidth=1.5, alpha=0.8, color='blue')
+    ax.set_ylabel("保有銘柄数", fontsize=12)
+    ax.set_title("日次保有銘柄数の推移", fontweight="bold", fontsize=14)
+    ax.grid(True, alpha=0.3)
+    ax.axhline(y=daily_counts['num_holdings'].mean(), color='red', linestyle='--', 
+               linewidth=1, alpha=0.7, label=f'平均: {daily_counts["num_holdings"].mean():.1f}銘柄')
+    ax.legend()
+    
+    # 2. 銘柄入れ替わり率の推移
+    ax = axes[1]
+    if len(turnover_df) > 0:
+        ax.plot(dates_index, turnover_df['turnover_rate'] * 100, 
+                linewidth=1.5, alpha=0.8, color='orange')
+        ax.set_ylabel("入れ替わり率 (%)", fontsize=12)
+        ax.set_title("日次銘柄入れ替わり率の推移", fontweight="bold", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        ax.axhline(y=turnover_df['turnover_rate'].mean() * 100, color='red', linestyle='--', 
+                   linewidth=1, alpha=0.7, label=f'平均: {turnover_df["turnover_rate"].mean():.2%}')
+        ax.legend()
+    
+    # 3. 新規追加・削除銘柄数の推移
+    ax = axes[2]
+    if len(turnover_df) > 0:
+        ax.plot(dates_index, turnover_df['new'], 
+                linewidth=1.5, alpha=0.8, color='green', label='新規追加')
+        ax.plot(dates_index, turnover_df['removed'], 
+                linewidth=1.5, alpha=0.8, color='red', label='削除')
+        ax.set_ylabel("銘柄数", fontsize=12)
+        ax.set_xlabel("日付", fontsize=12)
+        ax.set_title("日次新規追加・削除銘柄数の推移", fontweight="bold", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+    
+    # 日付フォーマット
+    for ax in axes:
+        ax.xaxis.set_major_locator(mdates.YearLocator())
+        ax.xaxis.set_minor_locator(mdates.MonthLocator((1, 7)))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+    
+    plt.tight_layout()
+    fig_path = OUTPUT_DIR / "daily_holdings_turnover.png"
+    fig.savefig(fig_path, dpi=150, bbox_inches='tight')
+    print(f"\n[INFO] Saved daily holdings turnover analysis to {fig_path}")
+    plt.close(fig)
+    
+    # 保有銘柄の散布図（銘柄コード vs 日付、サイズ=ウェイト）
+    plot_holdings_scatter(holdings_df, date_col, port_ret)
+    
+    # 銘柄の滞在期間分析
+    print("\n【銘柄滞在期間の分析】")
+    symbol_durations = []
+    for symbol in holdings_df['symbol'].unique():
+        symbol_data = holdings_df[holdings_df['symbol'] == symbol].sort_values(date_col)
+        if len(symbol_data) > 0:
+            first_date = symbol_data[date_col].min()
+            last_date = symbol_data[date_col].max()
+            duration = (last_date - first_date).days + 1
+            symbol_durations.append({
+                'symbol': symbol,
+                'first_date': first_date,
+                'last_date': last_date,
+                'duration_days': duration,
+                'appearances': len(symbol_data),
+            })
+    
+    if symbol_durations:
+        durations_df = pd.DataFrame(symbol_durations)
+        print(f"  平均滞在期間: {durations_df['duration_days'].mean():.1f}日")
+        print(f"  中央値滞在期間: {durations_df['duration_days'].median():.1f}日")
+        print(f"  最短滞在期間: {durations_df['duration_days'].min():.0f}日")
+        print(f"  最長滞在期間: {durations_df['duration_days'].max():.0f}日")
+        
+        # 滞在期間の分布
+        print("\n【滞在期間の分布】")
+        bins = [1, 5, 10, 20, 30, 60, 90, 180, 365, float('inf')]
+        bin_labels = ["1日", "2-5日", "6-10日", "11-20日", "21-30日", "31-60日", "61-90日", "91-180日", "181-365日", "366日以上"]
+        for i in range(len(bins) - 1):
+            count = ((durations_df['duration_days'] >= bins[i]) & (durations_df['duration_days'] < bins[i+1])).sum()
+            pct = count / len(durations_df) * 100 if len(durations_df) > 0 else 0
+            if count > 0:
+                print(f"  {bin_labels[i]}: {count:4d}銘柄 ({pct:5.1f}%)")
+
+
 def main():
     """メイン処理"""
     print("=" * 80)
@@ -763,6 +1110,15 @@ def main():
     print("\n[STEP 1] Loading data...")
     port_ret, tpx_ret = load_cross4_returns()
     inv_ret = load_inverse_returns()
+    
+    # 日次保有銘柄データの読み込み（オプション）
+    try:
+        holdings_df = load_daily_portfolio_holdings()
+        # 日次保有銘柄推移の分析
+        analyze_daily_holdings_turnover(holdings_df, port_ret)
+    except FileNotFoundError as e:
+        print(f"[WARN] {e}")
+        print("[WARN] 日次保有銘柄データが見つかりません。保有銘柄推移の分析をスキップします。")
     
     # インバースリターンをport_retのインデックスに合わせる
     if len(inv_ret) > 0:
