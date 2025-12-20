@@ -5,11 +5,12 @@ from pathlib import Path
 import argparse
 import sys
 
-# プロジェクトルートをパスに追加
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
+# scripts ディレクトリをパスに追加
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-from scripts.scoring_engine import run_from_config
+from core.scoring_engine import run_from_config
 
 
 def main() -> None:
@@ -31,6 +32,8 @@ def main() -> None:
     import yaml
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
+    
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
     
     asof = cfg.get("asof", "latest")
     outdir = PROJECT_ROOT / "data" / "intermediate" / "scoring"

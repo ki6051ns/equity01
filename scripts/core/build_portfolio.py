@@ -1,12 +1,18 @@
-# scripts/build_portfolio.py
+# scripts/core/build_portfolio.py
 
 from datetime import date
-
-import pandas as pd
+import sys
 from pathlib import Path
 
-from scoring_engine import ScoringEngineConfig, build_daily_portfolio
-from event_guard import EventGuard
+import pandas as pd
+
+# scripts ディレクトリをパスに追加
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from core.scoring_engine import ScoringEngineConfig, build_daily_portfolio
+from core.event_guard import EventGuard
 
 
 def main():

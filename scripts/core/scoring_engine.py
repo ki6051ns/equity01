@@ -10,6 +10,7 @@ scoring_engine.py
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Literal, Optional
 import numpy as np
 import pandas as pd
@@ -243,3 +244,98 @@ def build_daily_portfolio(
     out_cols = [c for c in out_cols if c in df.columns]
 
     return df[out_cols].sort_values([config.date_col, config.size_bucket_col, config.score_col], ascending=[True, True, False])
+
+
+def compute_scores_all(
+    df: pd.DataFrame,
+    base_col: str,
+    group_cols: tuple = ("date",),
+    ascending: bool = False,
+) -> pd.DataFrame:
+    """
+    スコアリングの複数方式を一括計算
+    
+    入力:
+        df: 入力DataFrame（base_colを含む）
+        base_col: スコア計算の元となるカラム名
+        group_cols: グループ化カラム（例: ("date",) または ("date", "sector")）
+        ascending: ランキングの順序（False=大きいほど上位）
+    
+    出力:
+        dfに以下を追加:
+        - score_z_lin: Z-score線形結合（base_colのZ-score）
+        - score_rank_only: ランクベーススコア（0-1正規化）
+    """
+    df = df.copy()
+    
+    if base_col not in df.columns:
+        raise KeyError(f"base_col '{base_col}' が見つかりません")
+    
+    # Z-score計算（group_cols単位）
+    def _zscore(x: pd.Series) -> pd.Series:
+        if x.std(ddof=0) == 0:
+            return pd.Series(0.0, index=x.index)
+        return (x - x.mean()) / x.std(ddof=0)
+    
+    df["score_z_lin"] = df.groupby(list(group_cols))[base_col].transform(_zscore)
+    
+    # ランクベーススコア（0-1正規化）
+    def _rank_score(x: pd.Series) -> pd.Series:
+        if len(x) == 0:
+            return pd.Series(0.0, index=x.index)
+        ranks = x.rank(ascending=ascending, method="min")
+        return (ranks - 1) / (len(x) - 1) if len(x) > 1 else pd.Series(0.0, index=x.index)
+    
+    df["score_rank_only"] = df.groupby(list(group_cols))[base_col].transform(_rank_score)
+    
+    return df
+
+
+def run_from_config(config_path: Path) -> pd.DataFrame:
+    """
+    設定ファイルからスコアを計算
+    
+    入力:
+        config_path: YAML設定ファイルのパス
+    
+    出力:
+        スコアDataFrame
+    """
+    import yaml
+    from pathlib import Path as PathLib
+    
+    # 設定ファイル読み込み
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    
+    # 簡易実装: 設定ファイルから必要な情報を読み込んでスコア計算
+    # 実際の実装は設定ファイルの内容に依存します
+    # ここでは最小限の実装を提供
+    
+    # 入力ファイルパス（設定ファイルから取得）
+    input_path = PathLib(cfg.get("input", {}).get("features", "data/processed/daily_feature_scores.parquet"))
+    
+    if not input_path.exists():
+        raise FileNotFoundError(f"入力ファイルが見つかりません: {input_path}")
+    
+    df = pd.read_parquet(input_path)
+    
+    # スコア計算（設定ファイルのパラメータに基づく）
+    base_col = cfg.get("scoring", {}).get("base_col", "feature_raw")
+    group_cols = tuple(cfg.get("scoring", {}).get("group_cols", ["date"]))
+    
+    if base_col not in df.columns:
+        # fallback: feature_scoreがあればそれを使う
+        if "feature_score" in df.columns:
+            base_col = "feature_score"
+        else:
+            raise KeyError(f"base_col '{base_col}' が見つかりません。利用可能なカラム: {df.columns.tolist()}")
+    
+    df = compute_scores_all(df, base_col=base_col, group_cols=group_cols)
+    
+    # 出力パス（設定ファイルから取得）
+    output_path = PathLib(cfg.get("output", {}).get("path", "data/intermediate/scoring/latest_scores.parquet"))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(output_path, index=False)
+    
+    return df

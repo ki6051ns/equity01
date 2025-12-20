@@ -1,5 +1,5 @@
 # equity01: AI駆動・日本株インテリジェント日次トレーディングシステム  
-**Version 2.5 / Updated: 2025-12-06（dev フェーズ完了版）**
+**Version 3.0 / Updated: 2025-12-20（stg移行完了版）**
 
 equity01 は **AI駆動 × 正統クオンツ**によって構築された  
 日本株向け **インテリジェント日次トレーディングシステム**です。
@@ -7,197 +7,321 @@ equity01 は **AI駆動 × 正統クオンツ**によって構築された
 ALPHAERS（統合戦略）の中核である **Equity Strategy Layer** を担い、  
 **透明性・説明可能性・再現性・堅牢性** を最優先に設計されています。
 
-本バージョン（v2.5）は  
-**8th〜13th commit の開発を正式にクローズ**し、  
-**dev → prod 移行の最終到達点** を示します。
+本バージョン（v3.0）は **stg移行完了版** であり、  
+**実行に必要な最小構成（MVP）** を固定し、**再現可能な実行入口** を確保しました。
 
 ---
 
-# 🚀 1. プロジェクト到達点（devフェーズ完了判定）
+# 📋 目次
 
-equity01 は現在、以下の5点をすべて満たし、**実運用可能な水準に到達**した。
-
-## **① 再現性ある relative α の安定抽出**
-- H60 / H90 / H120 のラダーホライゾンで  
-  **Sharpe > 0.70、α累積 +120〜130%** の持続的な α を確認  
-- Return-based パイプラインの統一により  
-  ALPHAERS 全体と合成可能な形式へ移行
-
-## **② EventGuard v1.1 による“ギャップ殺し”構造の確立**
-- FOMC / CPI / 雇用統計 / BOJ / SQ / 決算を統合管理  
-- 銘柄除外＋インバースヘッジが自動運転化  
-- 実運用に耐える「決算 × macro × WE跨ぎ」の三層構造
-
-## **③ STOP Regime（Plan A/B）の実装とロバストネステスト完勝**
-STOP Regime の目的：  
-**「ベータに引きずられて負ける年（2018・2022）を抑制」**
-
-徹底的な検証を実施し、**全テストで合格**：
-
-- IS/OOS（2016–19 / 2020–25）で性能崩れなし  
-- STOP中ウェイト（90/10〜60/40）で単調なロバスト性  
-- コスト込みでも α が残り、DD改善を維持  
-- 2016/2018/2020/2022 の全イベントで均等に寄与  
-- 単純STOP（TOPIX 60d < 0）でも方向性が一致
-
-→ **Plan A：STOP中 75% cross4 + 25% inverse（60d）  
-＝ equity01 標準 STOP ガードとして正式採用**
-
-## **④ リスクの実運用水準への落とし込み完了**
-Plan A（60d）：  
-- 年率 +19.55%（cross4: +14.6%）  
-- αシャープ 1.05  
-- MaxDD -21.8%（cross4: -32.7%）
-
-**DD・α・βの三要素がすべて“壊れない”構造を獲得。**
-
-## **⑤ メンテナンス性の確保（3/6/12ヶ月サイクル）**
-STOP Regime の  
-“壊れ方・検知ポイント・修復方法” が完全に固定化。
-
-→ **戦略を「長寿命パーツ」として運用可能なフェーズへ到達。**
+1. [セットアップ](#セットアップ)
+2. [実行方法](#実行方法)
+3. [データ配置](#データ配置)
+4. [TOPIXデータ取得のフォールバック仕様](#topixデータ取得のフォールバック仕様)
+5. [ディレクトリ構造](#ディレクトリ構造)
+6. [設計ルール](#設計ルール)
 
 ---
 
-# 🧱 2. アーキテクチャ概要（2025-12 Dev Closure）
+# 🔧 セットアップ
 
-```text
+## 前提条件
+
+- Python 3.8以上
+- pip（Pythonパッケージマネージャー）
+
+## インストール手順
+
+### 1. リポジトリのクローン
+
+```bash
+git clone <repository-url>
+cd equity01
+```
+
+### 2. 仮想環境の作成（推奨）
+
+```bash
+# Windows
+python -m venv venv
+venv\Scripts\activate
+
+# Linux/Mac
+python -m venv venv
+source venv/bin/activate
+```
+
+**注意**: `venv/` は `.gitignore` で除外されています。各環境で個別に作成してください。
+
+### 3. 依存パッケージのインストール
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. データディレクトリの確認
+
+以下のディレクトリが存在することを確認してください：
+
+- `data/raw/equities/` - 個別株価格データ（.parquet形式）
+- `data/raw/prices/` - 価格データ（.csv形式、一部）
+- `data/events/` - イベントカレンダー（calendar.csv, earnings.csv等）
+
+---
+
+# 🚀 実行方法
+
+## 基本実行（推奨）
+
+stgでの実行は **1本のコマンド** で完結します：
+
+```bash
+python scripts/core/run_equity01_eval.py
+```
+
+このコマンドで以下が順次実行されます：
+
+1. **TOPIXインデックスデータの更新** (`build_index_tpx_daily`)
+2. **ペーパートレード + 相対α計算** (`calc_alpha_beta`)
+3. **Rolling相対α計算** (`rolling_relative_alpha`)
+
+### 実行結果
+
+実行が成功すると、以下のファイルが生成されます：
+
+- `data/processed/index_tpx_daily.parquet` - TOPIX日次リターン
+- `data/processed/paper_trade_with_alpha_beta.parquet` - ペーパートレード結果 + 相対α
+- `data/processed/rolling_relative_alpha.parquet` - Rolling相対α（10/20/60/120日）
+
+## 統合評価レポート生成（オプション）
+
+詳細な月次集計・統計レポートを生成する場合：
+
+```bash
+python scripts/analysis/run_eval_report.py
+```
+
+**注意**: このコマンドは `core/run_equity01_eval.py` の後に実行してください。
+
+### 出力先
+
+- `research/reports/summary_stats.csv` - 基本統計
+- `research/reports/monthly_performance.csv` - 月次パフォーマンス
+
+---
+
+# 📁 データ配置
+
+## Git管理対象
+
+以下のディレクトリは **Gitで管理** されます：
+
+- `data/raw/` - 生データ（価格、イベントカレンダー等）
+- `data/intermediate/universe/` - ユニバース定義（.parquet）
+- `configs/` - 設定ファイル（.yml）
+
+## Git管理外（.gitignore）
+
+以下のディレクトリは **生成物** として `.gitignore` で除外されています：
+
+- `data/processed/` - 処理済みデータ（.parquet, .png等）
+- `data/intermediate/scoring/` - スコアリング中間結果
+- `research/reports/` - 研究用レポート（.png, .csv等）
+- `venv/` - 仮想環境
+- `__pycache__/` - Pythonキャッシュ
+
+## データ配置の推奨構造
+
+```
+data/
+├── raw/
+│   ├── equities/          # 個別株価格（.parquet）
+│   ├── prices/            # 価格データ（.csv、一部）
+│   ├── jpx_listings/      # JPX上場銘柄リスト
+│   ├── fx/                # FXデータ
+│   └── futures/           # 先物データ
+├── events/                # イベントカレンダー
+│   ├── calendar.csv       # マクロイベント
+│   └── earnings.csv       # 決算カレンダー
+├── processed/             # 生成物（Git管理外）
+│   ├── index_tpx_daily.parquet
+│   ├── paper_trade_with_alpha_beta.parquet
+│   └── rolling_relative_alpha.parquet
+└── intermediate/          # 中間生成物（Git管理外）
+    ├── universe/
+    └── scoring/
+```
+
+---
+
+# 🔄 TOPIXデータ取得のフォールバック仕様
+
+## 仕様概要
+
+equity01 は TOPIX インデックスデータを取得する際、以下の優先順位でフォールバックします：
+
+1. **^TOPX** (yfinance) - 試行するが、取得できない場合が多い
+2. **1306.T** (TOPIX連動ETF) - デフォルトフォールバック
+
+## 実装詳細
+
+`scripts/tools/build_index_tpx_daily.py` では以下のロジックで動作します：
+
+```python
+# 1. ^TOPX を試行
+try:
+    tpx_data = yf.download("^TOPX", ...)
+except:
+    # 2. 失敗したら 1306.T にフォールバック
+    tpx_data = yf.download("1306.T", ...)
+    # ログに「フォールバックした理由」を記録
+```
+
+## ログ出力
+
+フォールバックが発生した場合、以下のようなログが出力されます：
+
+```
+[ERROR] ^TOPX で取得失敗: yfinanceで取得できません(^TOPX)。ネットワーク/設定の可能性。詳細: None
+[OK] 1306.T で取得成功
+```
+
+## 運用上の注意
+
+- **監査性**: フォールバック発生時は必ずログに記録されます
+- **再現性**: 同じ環境では同じフォールバック動作をします
+- **データ品質**: 1306.T は TOPIX に連動するETFのため、ベンチマークとして使用可能です
+
+---
+
+# 📂 ディレクトリ構造
+
+```
 equity01/
-├─ data/
-│   ├─ raw/                # 日次価格（TOPIX浮動株比重で抽出した94銘柄）
-│   ├─ processed/
-│   │   ├─ features/       # 特徴量
-│   │   ├─ scores/         # スコア
-│   │   ├─ portfolio/      # 日次ポートフォリオ
-│   │   ├─ guards/         # EventGuard / STOP Regime
-│   │   └─ stop_regime_plots/
-│   └─ calendar/           # macro / earnings calendar
+├── README.md
+├── requirements.txt
+├── config.py
+├── .gitignore
 │
-├─ scripts/
-│   ├─ build_features.py
-│   ├─ scoring_engine.py
-│   ├─ build_portfolio.py
-│   ├─ event_guard.py               # EventGuard v1.1
-│   ├─ paper_trade.py               # Return-based BT
-│   ├─ run_single_horizon.py        # ラダーBT
-│   ├─ calc_alpha_beta.py           # 相対α分離
-│   ├─ eval_stop_regimes.py         # STOP評価
-│   └─ eval_stop_regimes_robustness.py # dev最終ロバスト性テスト
+├── scripts/
+│   ├── core/              # MVP最小構成（実行に必要な主要パイプライン）
+│   │   ├── download_prices.py
+│   │   ├── universe_builder.py
+│   │   ├── build_features.py
+│   │   ├── run_scoring.py
+│   │   ├── scoring_engine.py
+│   │   ├── build_portfolio.py
+│   │   ├── build_dynamic_portfolio.py
+│   │   ├── event_guard.py
+│   │   ├── build_regime_hmm.py
+│   │   ├── calc_alpha_beta.py
+│   │   └── run_equity01_eval.py      # 実行エントリポイント
+│   │
+│   ├── analysis/          # 研究・検証・可視化用（stgで隔離、prdには持ち込まない）
+│   │   ├── run_eval_report.py        # 統合評価レポート生成
+│   │   ├── monthly_performance.py
+│   │   ├── visualize_*.py
+│   │   └── ...
+│   │
+│   └── tools/             # 補助・ユーティリティ
+│       ├── data_loader.py
+│       ├── build_index_tpx_daily.py
+│       └── ...
 │
-├─ features/
-├─ models/          # Regime判定（PCA/HMM予定）
-├─ research/
-└─ exec/
-🧪 3. 8th〜13th commit の成果総括（dev フェーズの確定ログ）
-8th_commit – EventGuard v1.1
-macro/決算/WE跨ぎを階層化
+├── data/
+│   ├── raw/               # 生データ（Git管理）
+│   ├── processed/         # 生成物（.gitignoreで除外）
+│   └── intermediate/      # 中間生成物（.gitignoreで除外）
+│
+├── research/
+│   └── reports/           # 研究用レポート（.gitignoreで除外）
+│
+└── docs/
+    └── history/           # 進捗報告書アーカイブ（.gitignoreで除外）
+```
 
-inverseヘッジと銘柄除外の二段式
+---
 
-ヘッジ時点を「前日決定 → 当日実行」に統一
+# 🏗️ 設計ルール
 
-9th_commit – Return標準化 & α/β分離
-全処理を Return ベースに統一（PnL→Return）
+## 依存関係ルール
 
-relative α / β 分離を完全実装
+- ✅ **`core → tools`**: OK（補助機能の利用）
+- ❌ **`core → analysis`**: 禁止（評価レポート類はanalysisのエントリに寄せる）
+- ✅ **`analysis → core`**: OK（分析ツールがcore機能を利用）
+- ✅ **`analysis → tools`**: OK
 
-他ストラテジー（forex/future/parity）との合成基盤を確立
+## 実行エントリポイント
 
-10th_commit – ラダー方式（non-overlap horizon）
-H60/H90/H120 が αコアとして確立
+- **core**: `scripts/core/run_equity01_eval.py` - 基本評価パイプライン
+- **analysis**: `scripts/analysis/run_eval_report.py` - 統合評価レポート生成
 
-H5/H10 を補助ホライゾンとして採用
+## データ管理ルール
 
-H1/H20 は抑制（ノイズ・過大評価が顕著）
+- **生データ**: `data/raw/` は Git管理
+- **生成物**: `data/processed/`, `data/intermediate/` は `.gitignore` で除外
+- **研究用**: `research/reports/` は `.gitignore` で除外
 
-＝ Multi-Horizon Ensemble の基礎構築完了
+---
 
-11th〜13th_commit – STOP Regime（Plan A/B）
-STOP Regime の目的：
-「中期下落 × β暴走」を抑制して DD を縮小すること
+# 📊 パフォーマンス指標（参考）
 
-Plan A：cross4 75% + inverse 25%（標準ガード）
+equity01 の過去実績（2016-2025）：
 
-Plan B：cross4 50% + cash 50%（保守ガード）
+- **累積リターン**: +147.26%（ポートフォリオ） vs +163.15%（TOPIX）
+- **相対α**: -15.89%（期間全体）
+- **αシャープ**: 要計算（月次データから算出可能）
 
-全ロバストネステスト完勝（IS/OOS/コスト/イベント/単純化）
+**注意**: 上記は開発フェーズでのバックテスト結果です。実運用では異なる結果になる可能性があります。
 
-＝ STOP Regime は equity01 の正式ユニットとして採用
+---
 
-🧱 4. Devフェーズ総合判定（v2.5）
-検証項目	結果
-IS/OOSテスト	合格：OOS で DD改善＋α維持
-STOPウェイト	合格：特異点なし、単調トレードオフ
-コスト評価	合格：αが残り DD改善も維持
-イベント分析	合格：4イベントで均等寄与
-単純STOP	合格：構造的一貫性あり
-メンテ性	合格：3/6/12ヶ月の保守体系確立
+# 🔍 トラブルシューティング
 
-→ equity01 dev フェーズは正式終了
-→ 次 commit（14th）は prod transition commit
+## ImportError が発生する場合
 
-🔧 5. STOP Regime（Plan A）仕様（正式版 / v1.0）
-Regime Condition（採用）
-cross4 の 60日ローリングリターン
+```bash
+# 構文チェック
+python -m py_compile scripts/core/*.py
 
-中期下落局面のみ STOP ON
+# importチェック
+python scripts/core/run_equity01_eval.py --help
+```
 
-Positioning
-STOP OFF：cross4 100%
+## データが見つからない場合
 
-STOP ON：cross4 75% + TOPIX inverse 25%
+1. `data/raw/equities/` に価格データ（.parquet）が存在するか確認
+2. `data/events/` にイベントカレンダーが存在するか確認
+3. 必要に応じて `scripts/core/download_prices.py` を実行
 
-設計思想
-β完全中立ではなく
-「弱ロングβ」まで抑える現実的なガード
+## TOPIXデータ取得エラー
 
-役割
-equity01 の 標準安全ユニット（βダンパー）
+- `^TOPX` が取得できない場合は自動的に `1306.T` にフォールバックされます
+- ログに「フォールバックした理由」が記録されます
+- これは正常な動作です
 
-旗艦ポートフォリオの巨大βロングに対するショック吸収材
+---
 
-🔄 6. 今後のロードマップ（prod フェーズ / 2026〜）
-① Multi-Horizon Ensemble（H60/H90/H120）
-Sharpe/α/MaxDD に基づく動的ウェイト最適化。
+# 📝 変更履歴
 
-② パラメータアンサンブル（zscore × score）
-λ 制御による regime-based パラメータブレンディング。
+- **v3.0 (2025-12-20)**: stg移行完了版
+  - MVP最小構成（core 11本）を固定
+  - core → analysis依存を削除
+  - 実行エントリポイントを1本に統一
+  - READMEをstg/prd向けに更新
 
-③ Regime 判定（2026Q2〜）
-Breadth PCA / Sticky-HMM / BOCPD
-→ STOP やホライゾン・λ・βレバーを動的制御。
+- **v2.5 (2025-12-06)**: devフェーズ完了版
+  - STOP Regime（Plan A/B）の実装とロバストネステスト完勝
+  - EventGuard v1.1 による"ギャップ殺し"構造の確立
 
-④ EventGuard v0.3
-225先物5分・USDJPY σ距離・LLMニュース要約・簡易VAR。
+---
 
-⑤ prod-ready Pipeline
-スケジューラ（AM7:30/PM15:00）
+# 📧 連絡先・サポート
 
-IBKR（国内）API連携
+プロジェクトに関する質問や問題は、リポジトリのIssueトラッカーをご利用ください。
 
-score drift / beta drift / STOP騙し率モニタリング
+---
 
-📝 7. 所感（Dev Closure）
-equity01 は
-「日次の安定α × β制御 × イベント遮断」 を同時に達成し、
-実運用可能な 堅牢かつ長寿命な戦略パーツ へと進化した。
-
-特に Plan A（STOP中 75% + inverse 25%） は、
-
-DD を 10pt 以上圧縮
-
-α を 2倍級に拡張
-
-かつ壊れ方が予測でき
-
-修理も容易
-
-という極めて優秀な βガードユニットである。
-
-本日のロバストネステスト合格により
-equity01 dev は完全に終了し、
-次フェーズは prod（統合・運用・強化） へと移行する。
-
-Prepared by
-equity01 / Strategy Core Layer
-Research Plan v2.5（dev フェーズ完了版 / Updated 2025-12-06）
+**Prepared by**  
+equity01 / Strategy Core Layer  
+Research Plan v3.0（stg移行完了版 / Updated 2025-12-20）

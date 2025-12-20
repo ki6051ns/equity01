@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data files (generated artifacts)
+data/processed/**/*.parquet
+data/processed/**/*.png
+data/processed/**/*.csv
+data/interim/**/*
+data/intermediate/**/*.parquet
+data/intermediate/**/*.csv
+
+# Keep structure but ignore content
+!data/processed/.gitkeep
+!data/interim/.gitkeep
+!data/intermediate/.gitkeep
+
+# Reports and analysis outputs (research/analysis用 - stgで隔離)
+research/reports/**/*.png
+research/reports/**/*.csv
+data/processed/stop_regime_plots/**/*
+
+# Documentation history (Gitで管理する必要がない履歴)
+docs/history/**
+
+# Logs
+logs/*.log
+*.log
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large generated files
+*.parquet
+!data/raw/**/*.parquet
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+

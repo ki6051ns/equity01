@@ -9,12 +9,16 @@ from typing import Optional, Tuple
 import numpy as np
 import pandas as pd
 
-import data_loader  # 既存の load_prices を利用
+# scripts ディレクトリをパスに追加
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from tools import data_loader  # 既存の load_prices を利用
 
 # プロジェクトルートをパスに追加（config を読むため）
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]  # scripts/tools/ -> scripts/ -> equity01/
 if str(ROOT_DIR) not in sys.path:
-    sys.path.append(str(ROOT_DIR))
+    sys.path.insert(0, str(ROOT_DIR))
 import config  # type: ignore
 
 # STARTDATE は自動化：データが存在する最初の日を取得、または None で全期間

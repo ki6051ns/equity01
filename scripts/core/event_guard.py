@@ -16,6 +16,11 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
+# プロジェクトルートをパスに追加（config を読むため）
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = SCRIPT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 import config  # type: ignore
 
 

@@ -3,6 +3,23 @@ TOPIX 日次リターンテーブルの生成スクリプト
 
 data_loader.DataLoader を使って TOPIX の日足データを取得し、
 C→C 日次リターンを計算して data/processed/index_tpx_daily.parquet に保存する。
+
+【フォールバック仕様（prdまで通用する仕様）】
+1. デフォルト: ^TOPX (yfinance) を試行
+   - 成功した場合はそのまま使用
+   
+2. フォールバック: ^TOPX が取得できない場合、自動的に 1306.T (TOPIX連動ETF) を使用
+   - 1306.T は TOPIX に連動するETFのため、ベンチマークとして使用可能
+   - データ品質に問題はない
+   
+3. ログ出力: フォールバック発生時は必ずログに記録（監査性確保）
+   - [ERROR] ^TOPX で取得失敗: ...
+   - [OK] 1306.T で取得成功
+
+【運用上の注意】
+- ^TOPX は yfinance で取得できない場合が多い（正常な動作）
+- フォールバック発生時もデータ品質に問題はない
+- 同じ環境では同じフォールバック動作をします（再現性確保）
 """
 from pathlib import Path
 
@@ -33,10 +50,10 @@ def main() -> None:
             df = dl.load_stock_data(symbol, refresh=True)
             if df is not None and not df.empty:
                 used_symbol = symbol
-                print(f"✓ {symbol} で取得成功")
+                print(f"[OK] {symbol} で取得成功")
                 break
         except Exception as e:
-            print(f"✗ {symbol} で取得失敗: {e}")
+            print(f"[ERROR] {symbol} で取得失敗: {e}")
             continue
     
     if df is None or df.empty:

@@ -6,12 +6,14 @@ from pathlib import Path
 import sys
 from pathlib import Path as PathLib
 
-# core モジュールのパスを追加
-sys.path.insert(0, str(PathLib(__file__).parent.parent))
+# scripts ディレクトリをパスに追加
+SCRIPT_DIR = PathLib(__file__).resolve().parent.parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-from feature_builder import FeatureBuilderConfig, build_feature_matrix
+from tools.feature_builder import FeatureBuilderConfig, build_feature_matrix
 from core.scoring_engine import compute_scores_all
-import data_loader
+from tools import data_loader
 
 
 def main():

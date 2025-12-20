@@ -15,9 +15,11 @@ import sys
 import os
 
 # scripts ディレクトリをパスに追加
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-from paper_trade import PaperTradeConfig, run_paper_trade
+from tools.paper_trade import PaperTradeConfig, run_paper_trade
 
 
 def load_tpx_returns(path: str = "data/processed/index_tpx_daily.parquet") -> pd.DataFrame:
