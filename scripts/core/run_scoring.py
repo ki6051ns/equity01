@@ -10,7 +10,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from core.scoring_engine import run_from_config
+from scripts.core.scoring_engine import run_from_config
 
 
 def main() -> None:

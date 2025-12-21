@@ -12,12 +12,40 @@ STOP条件（alphaのローリング合計<0 かつ TOPIXのローリング合�
 """
 
 import sys
+import io
+import os
 from pathlib import Path
 
+# Windows環境での文字化け対策
+if sys.platform == 'win32':
+    # 環境変数を設定
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    # 標準出力のエンコーディングをUTF-8に設定
+    try:
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        else:
+            # Python 3.7以前の互換性
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        # 既に設定されている場合はスキップ
+        pass
+
 # プロジェクトルートをパスに追加
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]  # scripts/analysis/eval_stop_regimes.py -> project root
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+
+# --- sys.path設定: rebuild_port_ret_from_weights を確実にインポートできるようにする ---
+THIS_FILE = Path(__file__).resolve()
+ANALYSIS_DIR = THIS_FILE.parent      # .../scripts/analysis
+
+# どちらでも import できるように（安全側に追加）
+if str(ANALYSIS_DIR) not in sys.path:
+    sys.path.insert(0, str(ANALYSIS_DIR))
+# --- end sys.path設定 ---
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -53,6 +81,19 @@ else:  # Linux
 DATA_DIR = Path("data/processed")
 OUTPUT_DIR = Path("data/processed/stop_regime_plots")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# インバースETF ticker定数（共通定数からインポート）
+try:
+    from scripts.constants import INVERSE_ETF_TICKER, INVERSE_ETF_PRICE_PATHS
+except ImportError:
+    # フォールバック（互換性のため）
+    INVERSE_ETF_TICKER = "1569.T"
+    from pathlib import Path as PathLib
+    INVERSE_ETF_PRICE_PATHS = [
+        "data/processed/inverse_returns.parquet",
+        "data/processed/daily_returns_inverse.parquet",
+        str(PathLib("data/raw") / "equities" / f"{INVERSE_ETF_TICKER}.parquet"),
+    ]
 
 # horizon_ensemble.pyからインポート
 try:
@@ -130,75 +171,130 @@ except ImportError:
         return monthly_returns, yearly
 
 
-def load_cross4_returns() -> tuple:
+def load_cross4_returns(force_rebuild: bool = True, allow_legacy: bool = False) -> tuple:
     """
     cross4の日次リターンとTOPIXリターンを読み込む
+    
+    ⚠️ 重要: port_retはret_raw[t]（生の日次リターン）であることを前提とする
+    - shiftやrolling_sum等の変換を経ていない生のreturn
+    - STOP判定では.shift(1)でt-1までの情報を使用し、ret_raw[t]に適用される
+    
+    ✅ 修正（2024-08-05対応）:
+    - horizon_ensemble_variant_cross4.parquetから読み込むのではなく、
+      daily_portfolio_guarded + prices から毎回再構築して使用する（デフォルト）
+    - これにより「入力リーク」「別物return」「カレンダー事故」を物理的に封じ込める
+    - 再構築は w[t-1] * r[t] で行う（正しい定義）
+    
+    Parameters
+    ----------
+    force_rebuild : bool
+        Trueの場合、daily_portfolio_guarded + pricesから再構築する（デフォルト: True）
+    allow_legacy : bool
+        force_rebuild=Falseの場合のみ有効。旧方式（horizon_ensemble_variant_cross4.parquet）を使用
     
     Returns
     -------
     tuple
         (port_ret, tpx_ret) のタプル（pd.Series）
+        port_ret: ret_raw[t]（daily_portfolio_guarded + prices から再構築した生の日次リターン）
     """
-    cross4_path = DATA_DIR / "horizon_ensemble_variant_cross4.parquet"
-    
-    if not cross4_path.exists():
-        raise FileNotFoundError(
-            f"{cross4_path} がありません。先に ensemble_variant_cross4.py を実行してください。"
+    # port_retを再構築（デフォルト: 強制）
+    if force_rebuild:
+        try:
+            # 複数のインポートパスを試行
+            try:
+                from scripts.analysis.rebuild_port_ret_from_weights import rebuild_port_ret_from_weights
+            except ImportError:
+                try:
+                    from rebuild_port_ret_from_weights import rebuild_port_ret_from_weights
+                except ImportError:
+                    # 最後の試行: 相対インポート（直接ファイルパス指定）
+                    import importlib.util
+                    rebuild_path = ANALYSIS_DIR / "rebuild_port_ret_from_weights.py"
+                    if not rebuild_path.exists():
+                        raise ImportError(f"rebuild_port_ret_from_weights.pyが見つかりません: {rebuild_path}")
+                    spec = importlib.util.spec_from_file_location("rebuild_port_ret_from_weights", rebuild_path)
+                    rebuild_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(rebuild_module)
+                    rebuild_port_ret_from_weights = rebuild_module.rebuild_port_ret_from_weights
+            
+            rebuild_result = rebuild_port_ret_from_weights(use_adj_close=True, use_weight_lag=True)
+            port_ret = rebuild_result["port_ret"]
+            print(f"[INFO] [OK] Rebuilt cross4 returns from daily_portfolio_guarded + prices: {len(port_ret)} days")
+            print(f"  Date range: {port_ret.index.min().date()} ～ {port_ret.index.max().date()}")
+            print(f"  Method: w[t-1] * r_cc[t] (adj_close.pct_change())")
+            print(f"  [IMPORTANT] Look-ahead物理遮断: 旧系列（horizon_ensemble_variant_cross4.parquet）は使用しません")
+        except Exception as e:
+            raise RuntimeError(
+                f"rebuild_port_ret_from_weights のインポート/実行に失敗しました。\n"
+                f"look-ahead遮断のため、旧系列へフォールバックせず停止します。\n"
+                f"Error: {e}\n"
+                f"sys.path: {sys.path}\n"
+                f"ANALYSIS_DIR: {ANALYSIS_DIR}\n"
+                f"ROOT_DIR: {ROOT_DIR}"
+            )
+    elif allow_legacy:
+        # 旧系列（危険）。明示指定時のみ許可
+        print("[WARN] 旧系列（horizon_ensemble_variant_cross4.parquet）を使用します。look-aheadの可能性があります。")
+        cross4_path = DATA_DIR / "horizon_ensemble_variant_cross4.parquet"
+        
+        if not cross4_path.exists():
+            raise FileNotFoundError(
+                f"{cross4_path} がありません。先に ensemble_variant_cross4.py を実行してください。"
+            )
+        
+        df = pd.read_parquet(cross4_path)
+        
+        # 日付カラムを統一
+        date_col = "trade_date" if "trade_date" in df.columns else "date"
+        if date_col not in df.columns:
+            raise KeyError(f"日付カラムが見つかりません: {df.columns.tolist()}")
+        
+        df[date_col] = pd.to_datetime(df[date_col])
+        df = df.set_index(date_col).sort_index()
+        
+        # リターンカラムを確認
+        port_col = None
+        for col in ["port_ret_cc", "port_ret_cc_ens", "combined_ret"]:
+            if col in df.columns:
+                port_col = col
+                break
+        
+        if port_col is None:
+            raise KeyError(f"ポートフォリオリターン列が見つかりません: {df.columns.tolist()}")
+        
+        port_ret = df[port_col]
+        print(f"[INFO] Loaded cross4 returns from {cross4_path}: {len(port_ret)} days")
+    else:
+        raise ValueError(
+            "force_rebuild=False の場合は allow_legacy=True を指定してください。\n"
+            "デフォルトでは再構築（force_rebuild=True）を使用してください。"
         )
     
-    df = pd.read_parquet(cross4_path)
+    # TOPIXリターンを読み込む
+    tpx_path = DATA_DIR / "index_tpx_daily.parquet"
+    if not tpx_path.exists():
+        raise FileNotFoundError(
+            f"TOPIXリターンファイルが見つかりません: {tpx_path}\n"
+            "先に scripts/tools/build_index_tpx_daily.py を実行してください。"
+        )
     
-    # 日付カラムを統一
-    date_col = "trade_date" if "trade_date" in df.columns else "date"
-    if date_col not in df.columns:
-        raise KeyError(f"日付カラムが見つかりません: {df.columns.tolist()}")
+    df_tpx = pd.read_parquet(tpx_path)
+    tpx_date_col = "trade_date" if "trade_date" in df_tpx.columns else "date"
+    df_tpx[tpx_date_col] = pd.to_datetime(df_tpx[tpx_date_col])
+    df_tpx = df_tpx.set_index(tpx_date_col).sort_index()
     
-    df[date_col] = pd.to_datetime(df[date_col])
-    df = df.set_index(date_col).sort_index()
+    if "tpx_ret_cc" not in df_tpx.columns:
+        raise KeyError(f"TOPIXリターン列が見つかりません: {df_tpx.columns.tolist()}")
     
-    # リターンカラムを確認
-    port_col = None
-    for col in ["port_ret_cc", "port_ret_cc_ens", "combined_ret"]:
-        if col in df.columns:
-            port_col = col
-            break
-    
-    if port_col is None:
-        raise KeyError(f"ポートフォリオリターン列が見つかりません: {df.columns.tolist()}")
-    
-    tpx_col = None
-    for col in ["tpx_ret_cc", "tpx_ret"]:
-        if col in df.columns:
-            tpx_col = col
-            break
-    
-    if tpx_col is None:
-        # index_tpx_daily.parquetから読み込む
-        tpx_path = DATA_DIR / "index_tpx_daily.parquet"
-        if tpx_path.exists():
-            df_tpx = pd.read_parquet(tpx_path)
-            tpx_date_col = "trade_date" if "trade_date" in df_tpx.columns else "date"
-            df_tpx[tpx_date_col] = pd.to_datetime(df_tpx[tpx_date_col])
-            df_tpx = df_tpx.set_index(tpx_date_col).sort_index()
-            if "tpx_ret_cc" in df_tpx.columns:
-                tpx_ret = df_tpx["tpx_ret_cc"]
-            else:
-                raise KeyError(f"TOPIXリターン列が見つかりません: {df_tpx.columns.tolist()}")
-        else:
-            raise FileNotFoundError(
-                f"{cross4_path} にTOPIXリターンがなく、{tpx_path} も見つかりません。"
-            )
-    else:
-        tpx_ret = df[tpx_col]
-    
-    port_ret = df[port_col]
+    tpx_ret = df_tpx["tpx_ret_cc"]
     
     # インデックスで揃える（inner join）
     common_index = port_ret.index.intersection(tpx_ret.index)
     port_ret = port_ret.loc[common_index]
     tpx_ret = tpx_ret.loc[common_index]
     
-    print(f"[INFO] Loaded cross4 returns: {len(port_ret)} days")
+    print(f"[INFO] Aligned returns: {len(port_ret)} days")
     print(f"  Date range: {port_ret.index.min().date()} ～ {port_ret.index.max().date()}")
     
     return port_ret, tpx_ret
@@ -217,7 +313,7 @@ def load_inverse_returns() -> pd.Series:
     inverse_paths = [
         DATA_DIR / "inverse_returns.parquet",
         DATA_DIR / "daily_returns_inverse.parquet",
-        Path("data/raw") / "equities" / "1569.T.parquet",
+        Path("data/raw") / "equities" / f"{INVERSE_ETF_TICKER}.parquet",
     ]
     
     for path in inverse_paths:
@@ -272,11 +368,17 @@ def load_inverse_returns() -> pd.Series:
 
 def compute_stop_conditions(port_ret: pd.Series, tpx_ret: pd.Series, windows: list = [60, 120]) -> dict:
     """
-    STOP条件を計算
+    STOP条件を計算（docs/return_definition.md参照）
     
     ✅ チェック1: ルックアヘッドバイアスを回避
     - 当日リターンを含めたrollingを使わないよう、必ず.shift(1)を使用
     - これにより「前日までの情報で当日の判定」を行う
+    
+    STOP条件の定義:
+    - alpha[t] = port_ret[t] - tpx_ret[t]
+    - roll_alpha[t] = sum_{k=t-window}^{t-1} alpha[k]  (前日までの合計)
+    - roll_tpx[t] = sum_{k=t-window}^{t-1} tpx_ret[k]  (前日までの合計)
+    - stop_flag[t] = (roll_alpha[t] < 0) & (roll_tpx[t] < 0)
     
     Parameters
     ----------
@@ -370,6 +472,8 @@ def compute_strategy_returns(
         
         # ✅ STOP0: STOP中はリターン0（キャッシュ100%）
         # np.where(stop_cond, 0.0, port_ret) = stop_condがTrueなら0.0、Falseならport_ret
+        # 注意: port_retはret_raw[t]（生の日次リターン）であることを前提とする
+        # stop_cond[t]はt-1までの情報で判定されたものなので、ret_raw[t]に適用される（正しい）
         ret_stop0 = np.where(stop_cond, 0.0, port_ret.values)
         strategies[f"stop0_{window}"] = pd.Series(ret_stop0, index=port_ret.index)
         
@@ -400,6 +504,8 @@ def compute_strategy_returns(
         print(f"  実効ウェイト平均 (STOP期間外): {weights_series[~stop_cond].mean():.6f}")
         
         # Plan A: STOP中はcross4 75% + inverse 25%（合計100%）
+        # 注意: port_retはret_raw[t]（生の日次リターン）であることを前提とする
+        # stop_cond[t]はt-1までの情報で判定されたものなので、ret_raw[t]に適用される（正しい）
         ret_A = np.where(stop_cond, 0.75 * port_ret.values + 0.25 * inv_ret_aligned.values, port_ret.values)
         strategies[f"planA_{window}"] = pd.Series(ret_A, index=port_ret.index)
         
@@ -448,6 +554,8 @@ def compute_strategy_returns(
             print(f"  STOP期間外のPlanA vs inverse相関: {corr_A_non_stop:.4f} (想定: 低い相関)")
         
         # Plan B: STOP中はcross4 50% + cash 50%
+        # 注意: port_retはret_raw[t]（生の日次リターン）であることを前提とする
+        # stop_cond[t]はt-1までの情報で判定されたものなので、ret_raw[t]に適用される（正しい）
         ret_B = np.where(stop_cond, 0.5 * port_ret.values, port_ret.values)
         strategies[f"planB_{window}"] = pd.Series(ret_B, index=port_ret.index)
     

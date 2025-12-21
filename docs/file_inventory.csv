@@ -1,0 +1,71 @@
+path,category,why,inputs,outputs,referenced_by
+scripts/core/run_equity01_eval.py,KEEP_CORE,実行入口。日次実行に必須。build_index_tpx_dailyとcalc_alpha_betaを呼び出す。依存図: index_tpx_daily → paper_trade_with_alpha_beta → rolling_relative_alpha。,data/processed/index_tpx_daily.parquet,data/processed/paper_trade_with_alpha_beta.parquet,data/processed/rolling_relative_alpha.parquet,scripts/core/run_equity01_eval.py (エントリポイント)
+scripts/core/run_scoring.py,KEEP_CORE,スコアリング実行入口。日次実行に必要。,configs/scoring.yml,latest_scores.parquet,scripts/core/run_scoring.py (エントリポイント)
+scripts/core/scoring_engine.py,KEEP_CORE,スコアリングエンジンの中核（運用MVP統一版）。run_scoringから呼ばれる。,daily_feature_scores.parquet,latest_scores.parquet,scripts/core/run_scoring.py,scripts/core/build_features.py,scripts/core/build_portfolio.py
+scripts/core/build_features.py,KEEP_CORE,特徴量構築。日次実行に必要。依存図: equities/*.parquet + index_tpx_daily → daily_feature_scores。coreではじまりcoreで終わる原則に従う。,data/raw/equities/*.parquet,data/processed/index_tpx_daily.parquet,data/processed/daily_feature_scores.parquet,scripts/core/build_features.py (エントリポイント、coreフロー内)
+scripts/core/build_portfolio.py,KEEP_CORE,ポートフォリオ構築。日次実行に必要。coreフローの終点（daily_portfolio_guarded.parquet生成）。依存図: daily_feature_scores → daily_portfolio_guarded。,data/processed/daily_feature_scores.parquet,data/processed/daily_portfolio_guarded.parquet,scripts/core/build_portfolio.py (エントリポイント、coreフロー終点)
+scripts/core/calc_alpha_beta.py,KEEP_CORE,ペーパートレードとα計算。run_equity01_evalから呼ばれる。,daily_portfolio_guarded.parquet,index_tpx_daily.parquet,paper_trade_with_alpha_beta.parquet,scripts/core/run_equity01_eval.py
+scripts/core/universe_builder.py,KEEP_CORE,ユニバース構築。日次実行に必要。,configs/universe.yml,data/raw/jpx_listings/*.csv,data/intermediate/universe/latest_universe.parquet,scripts/core/universe_builder.py (エントリポイント)
+scripts/core/download_prices.py,KEEP_CORE,価格データ取得。日次実行に必要。,latest_universe.parquet,data/raw/equities/*.parquet,scripts/core/download_prices.py (エントリポイント)
+scripts/core/event_guard.py,KEEP_CORE,イベントガード機能。build_portfolioから使用される。,data/events/calendar.csv,data/events/earnings.csv,(関数として使用),scripts/core/build_portfolio.py
+scripts/core/build_regime_hmm.py,KEEP_STG_ANALYSIS,レジームHMM構築。STOP戦略検証に使用。,horizon_ensemble_variant_cross4.parquet,regime_labels.parquet,scripts/core/build_regime_hmm.py (エントリポイント、eval_stop_regimes系の前段階)
+scripts/core/build_dynamic_portfolio.py,QUARANTINE_OTHER,動的ポートフォリオ構築。cross4/STOP運用ラインとは別系統のparityプロジェクト。,horizon_ensemble_rank_only.parquet,horizon_ensemble_variant_cross3.parquet,portfolio_root_sigma.parquet,dynamic_weights_root_sigma.parquet,scripts/core/build_dynamic_portfolio.py (エントリポイント、parity用)
+archive/core_deprecated/scoring_engine_variants.py,ARCHIVE_DEPRECATED,core/scoring_engine.pyから移動されたvariant探索用の旧実装。現在は使用されていない。scripts/analysis/scoring_variants.pyに移行。,（使用されていない）,(使用されていない),（参照なし）
+scripts/analysis/scoring_variants.py,ARCHIVE_RESEARCH,variant探索用のスコアリング実装。core/scoring_engine.pyからvariant機能を分離。coreを触らずにvariant探索が可能。,(関数ライブラリ),(関数ライブラリ),scripts/analysis/scoring_variants.py (variant探索用)
+scripts/tools/build_index_tpx_daily.py,KEEP_CORE,TOPIXデータ構築。run_equity01_evalから呼ばれる。,data/raw/prices/*.csv,index_tpx_daily.parquet,scripts/core/run_equity01_eval.py
+scripts/tools/paper_trade.py,KEEP_CORE,ペーパートレード実行。calc_alpha_betaから呼ばれる。,daily_portfolio_guarded.parquet,paper_trade_daily.parquet,scripts/core/calc_alpha_beta.py
+scripts/tools/data_loader.py,KEEP_CORE,データローダー。複数のcore/analysisスクリプトから使用される。,data/raw/equities/*.parquet,(関数ライブラリ),scripts/core/build_features.py,scripts/analysis/horizon_ensemble.py
+scripts/tools/feature_builder.py,KEEP_CORE,特徴量ビルダー。build_featuresから使用される。,(関数ライブラリ),scripts/core/build_features.py
+scripts/tools/weights_cleaning.py,KEEP_CORE,ウェイトクリーニング。build_portfolioから使用される。,(関数ライブラリ),scripts/core/build_portfolio.py,scripts/analysis/horizon_ensemble.py
+scripts/tools/order_builder.py,KEEP_CORE,オーダービルダー。実運用接続に必要。,(関数ライブラリ),scripts/tools/order_builder.py (将来実運用で使用)
+scripts/tools/execution_simulator.py,KEEP_CORE,エクゼキューションシミュレーター。実運用接続に必要。,(関数ライブラリ),scripts/tools/execution_simulator.py (将来実運用で使用)
+scripts/tools/portfolio_optimizer.py,KEEP_CORE,ポートフォリオオプティマイザー。実運用接続に必要。,(関数ライブラリ),scripts/tools/portfolio_optimizer.py (将来実運用で使用)
+scripts/tools/fetch_prices.py,ARCHIVE_RESEARCH,価格取得ユーティリティ（古い実装）。data_loaderで代替可能。,(関数ライブラリ),scripts/tools/fetch_prices.py (非推奨、data_loader使用推奨)
+scripts/tools/calc_minimum_capital.py,ARCHIVE_RESEARCH,最低資本計算。研究用ユーティリティ。,(関数ライブラリ),scripts/tools/calc_minimum_capital.py
+scripts/tools/post_loss_analyzer.py,ARCHIVE_RESEARCH,損失分析。研究用ユーティリティ。,(関数ライブラリ),scripts/tools/post_loss_analyzer.py
+scripts/tools/regime_engine.py,ARCHIVE_RESEARCH,レジームエンジン。研究用ユーティリティ。build_regime_hmmで代替。,(関数ライブラリ),scripts/tools/regime_engine.py (build_regime_hmmで代替)
+scripts/tools/preview_parquet.py,ARCHIVE_RESEARCH,Parquetプレビュー。開発・デバッグ用。,(関数ライブラリ),scripts/tools/preview_parquet.py (開発用)
+scripts/tools/preview_universe.py,ARCHIVE_RESEARCH,ユニバースプレビュー。開発・デバッグ用。,(関数ライブラリ),scripts/tools/preview_universe.py (開発用)
+scripts/tools/validate_listings.py,ARCHIVE_RESEARCH,リスト検証。開発・デバッグ用。,(関数ライブラリ),scripts/tools/validate_listings.py (開発用)
+scripts/analysis/run_eval_report.py,KEEP_STG_ANALYSIS,統合評価レポート生成。stgレビューで必須。,paper_trade_with_alpha_beta.parquet,research/reports/performance_summary.csv,scripts/analysis/run_eval_report.py (エントリポイント)
+scripts/analysis/eval_stop_regimes.py,KEEP_STG_ANALYSIS,STOP条件評価。stgレビュー・採用判断に必要。,horizon_ensemble_variant_cross4.parquet,data/processed/stop_regime_plots/*,scripts/analysis/eval_stop_regimes.py (エントリポイント)
+scripts/analysis/eval_stop_regimes_robustness.py,KEEP_STG_ANALYSIS,STOP条件ロバストネステスト。採用可否判断の主力検証（OOS/コスト/重みロバスト等）。,horizon_ensemble_variant_cross4.parquet,data/processed/stop_regime_robustness/*,scripts/analysis/eval_stop_regimes_robustness.py (エントリポイント)
+scripts/analysis/ensemble_variant_cross4.py,KEEP_STG_ANALYSIS,運用に近いアンサンブル。cross4生成。eval_stop_regimes系から参照される。,paper_trade_h*_*_rank.parquet,paper_trade_h*_*_zdownvol.parquet,horizon_ensemble_variant_cross4.parquet,scripts/analysis/eval_stop_regimes.py,scripts/analysis/eval_stop_regimes_robustness.py,scripts/core/build_regime_hmm.py
+scripts/analysis/monthly_performance.py,KEEP_STG_ANALYSIS,月次パフォーマンス集計。run_eval_reportから呼ばれる。,paper_trade_with_alpha_beta.parquet,monthly_returns.parquet,monthly_relative_alpha.parquet,scripts/analysis/run_eval_report.py
+scripts/analysis/horizon_ensemble.py,ARCHIVE_RESEARCH,ホライゾンアンサンブル基盤ライブラリ。ensemble_*系で使用されるが、研究・実験用。,daily_feature_scores.parquet,horizon_ensemble.parquet,(関数ライブラリ),scripts/analysis/ensemble_*.py,scripts/analysis/run_all_*.py
+analysis/backtest_non_ladder.py,ARCHIVE_RESEARCH,非ラダーバックテスト。研究・実験用。,daily_feature_scores.parquet,paper_trade_h*_nonladder_*.parquet,analysis/run_all_*.py
+analysis/rolling_relative_alpha.py,ARCHIVE_RESEARCH,ローリング相対α計算。研究用分析。,paper_trade_with_alpha_beta.parquet,rolling_relative_alpha_*.parquet,analysis/rolling_relative_alpha.py (エントリポイント)
+analysis/aggregate_yearly_performance.py,ARCHIVE_RESEARCH,年次集計。研究用分析。,monthly_returns.parquet,(出力なし、print表示),analysis/aggregate_yearly_performance.py (エントリポイント)
+analysis/run_all_rank_only.py,ARCHIVE_RESEARCH,rank-only全ホライゾンバックテスト。研究・実験用。,daily_feature_scores.parquet,paper_trade_h*_*_rank.parquet,analysis/run_all_rank_only.py (エントリポイント、ensemble_variant_cross4の前段階だが研究用)
+analysis/run_all_zclip.py,ARCHIVE_RESEARCH,zclip全ホライゾンバックテスト。研究・実験用。,daily_feature_scores.parquet,paper_trade_h*_*_zclip.parquet,analysis/run_all_zclip.py (エントリポイント)
+analysis/run_all_zdownbeta.py,ARCHIVE_RESEARCH,zdownbeta全ホライゾンバックテスト。研究・実験用。,daily_feature_scores.parquet,paper_trade_h*_*_zdownbeta.parquet,analysis/run_all_zdownbeta.py (エントリポイント)
+analysis/run_all_zdowncombo.py,ARCHIVE_RESEARCH,zdowncombo全ホライゾンバックテスト。研究・実験用。,daily_feature_scores.parquet,paper_trade_h*_*_zdowncombo.parquet,analysis/run_all_zdowncombo.py (エントリポイント)
+analysis/run_all_zdownvol.py,ARCHIVE_RESEARCH,zdownvol全ホライゾンバックテスト。研究・実験用。,daily_feature_scores.parquet,paper_trade_h*_*_zdownvol.parquet,analysis/run_all_zdownvol.py (エントリポイント、ensemble_variant_cross4の前段階だが研究用)
+analysis/run_all_zlin.py,ARCHIVE_RESEARCH,zlin全ホライゾンバックテスト。研究・実験用。,daily_feature_scores.parquet,paper_trade_h*_*_zlin.parquet,analysis/run_all_zlin.py (エントリポイント)
+analysis/run_all_zlowvol.py,ARCHIVE_RESEARCH,zlowvol全ホライゾンバックテスト。研究・実験用。,daily_feature_scores.parquet,paper_trade_h*_*_zlowvol.parquet,analysis/run_all_zlowvol.py (エントリポイント)
+analysis/ensemble_rank_only.py,ARCHIVE_RESEARCH,rank-onlyアンサンブル。研究・実験用。cross4で代替。,paper_trade_h*_*_rank.parquet,horizon_ensemble_rank_only.parquet,analysis/ensemble_rank_only.py (エントリポイント)
+analysis/ensemble_zclip.py,ARCHIVE_RESEARCH,zclipアンサンブル。研究・実験用。,paper_trade_h*_*_zclip.parquet,horizon_ensemble_zclip.parquet,analysis/ensemble_zclip.py (エントリポイント)
+analysis/ensemble_zdownbeta.py,ARCHIVE_RESEARCH,zdownbetaアンサンブル。研究・実験用。,paper_trade_h*_*_zdownbeta.parquet,horizon_ensemble_zdownbeta.parquet,analysis/ensemble_zdownbeta.py (エントリポイント)
+analysis/ensemble_zdowncombo.py,ARCHIVE_RESEARCH,zdowncomboアンサンブル。研究・実験用。,paper_trade_h*_*_zdowncombo.parquet,horizon_ensemble_zdowncombo.parquet,analysis/ensemble_zdownbeta.py (エントリポイント)
+analysis/ensemble_zdownvol.py,ARCHIVE_RESEARCH,zdownvolアンサンブル。研究・実験用。cross4の一部だが単独実行は研究用。,paper_trade_h*_*_zdownvol.parquet,horizon_ensemble_zdownvol.parquet,analysis/ensemble_zdownvol.py (エントリポイント)
+analysis/ensemble_zlin.py,ARCHIVE_RESEARCH,zlinアンサンブル。研究・実験用。,paper_trade_h*_*_zlin.parquet,horizon_ensemble_zlin.parquet,analysis/ensemble_zlin.py (エントリポイント)
+analysis/ensemble_zlowvol.py,ARCHIVE_RESEARCH,zlowvolアンサンブル。研究・実験用。,paper_trade_h*_*_zlowvol.parquet,horizon_ensemble_zlowvol.parquet,analysis/ensemble_zlowvol.py (エントリポイント)
+analysis/ensemble_variant_cross.py,ARCHIVE_RESEARCH,Variant横断アンサンブル（旧版）。研究・実験用。cross4で代替。,paper_trade_h*_*_*.parquet,horizon_ensemble_variant_cross.parquet,analysis/ensemble_variant_cross.py (エントリポイント)
+analysis/ensemble_variant_cross2.py,ARCHIVE_RESEARCH,Variant横断アンサンブル（v2）。研究・実験用。cross4で代替。,paper_trade_h*_*_*.parquet,horizon_ensemble_variant_cross2.parquet,analysis/ensemble_variant_cross2.py (エントリポイント)
+analysis/ensemble_variant_cross3.py,ARCHIVE_RESEARCH,Variant横断アンサンブル（v3）。研究・実験用。cross4で代替。build_dynamic_portfolioから参照されるがparity用。,paper_trade_h*_*_*.parquet,horizon_ensemble_variant_cross3.parquet,analysis/ensemble_variant_cross3.py (エントリポイント),core/build_dynamic_portfolio.py (parity用)
+analysis/ensemble_custom_weights.py,ARCHIVE_RESEARCH,カスタムウェイトアンサンブル。研究・実験用。,paper_trade_h*_*_*.parquet,horizon_ensemble_custom.parquet,analysis/ensemble_custom_weights.py (エントリポイント)
+analysis/run_ensemble_custom_simple.py,ARCHIVE_RESEARCH,カスタムアンサンブル簡易実行。研究・実験用。,horizon_ensemble_*.parquet,horizon_ensemble_custom.parquet,analysis/run_ensemble_custom_simple.py (エントリポイント)
+analysis/run_ensemble_from_existing.py,ARCHIVE_RESEARCH,既存アンサンブルから実行。研究・実験用。,horizon_ensemble_*.parquet,horizon_ensemble.parquet,analysis/run_ensemble_from_existing.py (エントリポイント)
+analysis/run_single_horizon.py,ARCHIVE_RESEARCH,単一ホライゾン実行。研究・実験用。,daily_feature_scores.parquet,paper_trade_h*_*.parquet,analysis/run_single_horizon.py (エントリポイント)
+analysis/compare_ladder_vs_baseline.py,ARCHIVE_RESEARCH,ラダーvsベースライン比較。研究・実験用。,paper_trade_h*_*.parquet,(出力なし、print表示),analysis/compare_ladder_vs_baseline.py (エントリポイント)
+analysis/check_h1_stats.py,ARCHIVE_RESEARCH,H1統計チェック。開発・デバッグ用。,paper_trade_h1_*.parquet,(出力なし、print表示),analysis/check_h1_stats.py (エントリポイント)
+analysis/check_horizon_progress.py,ARCHIVE_RESEARCH,ホライゾン進捗チェック。開発・デバッグ用。,paper_trade_h*_*.parquet,(出力なし、print表示),analysis/check_horizon_progress.py (エントリポイント)
+analysis/visualize_bpi.py,ARCHIVE_RESEARCH,BPI可視化。研究・可視化用。,research/reports/bpi_126d/*,(出力なし、plot表示),analysis/visualize_bpi.py (エントリポイント)
+analysis/visualize_bpi_126d.py,ARCHIVE_RESEARCH,BPI 126日可視化。研究・可視化用。,research/reports/bpi_126d/*,(出力なし、plot表示),analysis/visualize_bpi_126d.py (エントリポイント)
+analysis/visualize_inverse_etf_126d.py,ARCHIVE_RESEARCH,インバースETF 126日可視化。研究・可視化用。,research/reports/inverse_etf_126d/*,(出力なし、plot表示),analysis/visualize_inverse_etf_126d.py (エントリポイント)
+analysis/visualize_regime_hmm.py,ARCHIVE_RESEARCH,レジームHMM可視化。研究・可視化用。,horizon_ensemble_variant_cross4.parquet,regime_labels.parquet,(出力なし、plot表示),analysis/visualize_regime_hmm.py (エントリポイント)
+analysis/build_bpi.py,ARCHIVE_RESEARCH,BPI構築。研究用分析。,horizon_ensemble_rank_only.parquet,research/reports/bpi_126d/*,analysis/build_bpi.py (エントリポイント)
+analysis/calc_bpi_126d.py,ARCHIVE_RESEARCH,BPI 126日計算。研究用分析。,horizon_ensemble_rank_only.parquet,horizon_ensemble_variant_cross3.parquet,research/reports/bpi_126d/*,analysis/calc_bpi_126d.py (エントリポイント)
+analysis/dynamic_portfolio_performance.py,QUARANTINE_OTHER,動的ポートフォリオパフォーマンス計算。parityプロジェクト用。,portfolio_root_sigma.parquet,dynamic_portfolio_with_alpha_beta_*.parquet,analysis/dynamic_portfolio_performance.py (エントリポイント、parity用)
+analysis/example_dynamic_allocation.py,QUARANTINE_OTHER,動的配分使用例。parityプロジェクト用。,alloc/dynamic_allocation.py,(出力なし、print表示),analysis/example_dynamic_allocation.py (エントリポイント、parity用)
+

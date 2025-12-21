@@ -11,8 +11,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from core.scoring_engine import ScoringEngineConfig, build_daily_portfolio
-from core.event_guard import EventGuard
+from scripts.core.scoring_engine import ScoringEngineConfig, build_daily_portfolio
+from scripts.core.event_guard import EventGuard
 
 
 def main():

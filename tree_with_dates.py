@@ -7,13 +7,13 @@ from datetime import datetime
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
-def tree_with_dates(path, prefix='', is_last=True, show_ext=True):
+def tree_with_dates(path, prefix='', is_last=True, show_ext=True, output=sys.stdout):
     path = Path(path)
     if not path.exists():
-        print(f'エラー: パスが見つかりません: {path}')
+        print(f'エラー: パスが見つかりません: {path}', file=output)
         return
     
-    items = sorted([p for p in path.iterdir() if p.name not in ['.git', '__pycache__', '.gitignore']], 
+    items = sorted([p for p in path.iterdir() if p.name not in ['.git', '__pycache__', '.gitignore', '.venv', 'venv']], 
                    key=lambda x: (x.is_file(), x.name))
     
     for i, item in enumerate(items):
@@ -31,27 +31,41 @@ def tree_with_dates(path, prefix='', is_last=True, show_ext=True):
             # 拡張子を取得
             ext = item.suffix if item.suffix else '(拡張子なし)'
             if show_ext:
-                print(f'{prefix}{current_prefix}{item.name} [{ext}] ({mtime.strftime("%Y-%m-%d %H:%M:%S")}, {size_str})')
+                print(f'{prefix}{current_prefix}{item.name} [{ext}] ({mtime.strftime("%Y-%m-%d %H:%M:%S")}, {size_str})', file=output)
             else:
-                print(f'{prefix}{current_prefix}{item.name}  ({mtime.strftime("%Y-%m-%d %H:%M:%S")}, {size_str})')
+                print(f'{prefix}{current_prefix}{item.name}  ({mtime.strftime("%Y-%m-%d %H:%M:%S")}, {size_str})', file=output)
         else:
             # ディレクトリの最終更新日時も表示
             mtime = datetime.fromtimestamp(item.stat().st_mtime)
-            print(f'{prefix}{current_prefix}{item.name}/ ({mtime.strftime("%Y-%m-%d %H:%M:%S")})')
+            print(f'{prefix}{current_prefix}{item.name}/ ({mtime.strftime("%Y-%m-%d %H:%M:%S")})', file=output)
             next_prefix = prefix + ('    ' if is_last_item else '│   ')
-            tree_with_dates(item, next_prefix, is_last_item, show_ext)
+            tree_with_dates(item, next_prefix, is_last_item, show_ext, output)
 
 if __name__ == '__main__':
-    if len(sys.argv) > 1:
-        target_path = sys.argv[1]
-    else:
-        target_path = 'data'
+    import argparse
     
-    path = Path(target_path)
+    parser = argparse.ArgumentParser(description='ディレクトリツリーを拡張子と最終更新日時込みで表示')
+    parser.add_argument('path', nargs='?', default='.', help='対象ディレクトリパス（デフォルト: カレントディレクトリ）')
+    parser.add_argument('-o', '--output', help='出力先ファイルパス（指定しない場合は標準出力）')
+    args = parser.parse_args()
+    
+    path = Path(args.path)
     if not path.exists():
-        print(f'エラー: 指定されたパスが見つかりません: {target_path}')
+        print(f'エラー: 指定されたパスが見つかりません: {args.path}', file=sys.stderr)
         sys.exit(1)
     
-    print(f'{path.name}/')
-    tree_with_dates(target_path)
+    # 出力先を決定
+    if args.output:
+        output_file = open(args.output, 'w', encoding='utf-8')
+        output = output_file
+    else:
+        output = sys.stdout
+    
+    try:
+        print(f'{path.name}/', file=output)
+        tree_with_dates(path, output=output)
+    finally:
+        if args.output:
+            output_file.close()
+            print(f'\n出力完了: {args.output}', file=sys.stderr)
 

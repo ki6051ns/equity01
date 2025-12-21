@@ -32,8 +32,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from tools.build_index_tpx_daily import main as build_index_main
-from core.calc_alpha_beta import main as calc_alpha_main
+from scripts.tools.build_index_tpx_daily import main as build_index_main
+from scripts.core.calc_alpha_beta import main as calc_alpha_main
 
 WINDOWS = [10, 20, 60, 120]
 

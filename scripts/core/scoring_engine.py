@@ -291,6 +291,17 @@ def compute_scores_all(
     return df
 
 
+def _zscore(x: pd.Series) -> pd.Series:
+    """
+    Z-score計算ヘルパー関数
+    
+    この関数は build_features.py から使用されます。
+    """
+    if x.std(ddof=0) == 0:
+        return pd.Series(0.0, index=x.index)
+    return (x - x.mean()) / x.std(ddof=0)
+
+
 def run_from_config(config_path: Path) -> pd.DataFrame:
     """
     設定ファイルからスコアを計算

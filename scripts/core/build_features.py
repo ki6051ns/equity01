@@ -12,7 +12,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from tools.feature_builder import FeatureBuilderConfig, build_feature_matrix
-from core.scoring_engine import compute_scores_all
+from scripts.core.scoring_engine import compute_scores_all, _zscore
 from tools import data_loader
 
 
@@ -148,12 +148,10 @@ def main():
     
     # 20日ボラの z-score
     if "vol_20d" in df_featured.columns and "vol_20d_z" not in df_featured.columns:
-        from core.scoring_engine import _zscore
         df_featured["vol_20d_z"] = g["vol_20d"].transform(_zscore)
     
     # もし beta_252d があるなら同様に（現時点では未実装）
     if "beta_252d" in df_featured.columns and "beta_252d_z" not in df_featured.columns:
-        from core.scoring_engine import _zscore
         df_featured["beta_252d_z"] = g["beta_252d"].transform(_zscore)
 
     # ① z_lin と rank_only の両方の score 列を追加

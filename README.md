@@ -73,9 +73,113 @@ pip install -r requirements.txt
 
 ## 基本実行（推奨）
 
-stgでの実行は **1本のコマンド** で完結します：
+### 運用フロー（core完結）
+
+運用フローは以下の順序で実行します：
 
 ```bash
+# 1. ユニバース構築
+python scripts/core/universe_builder.py --config configs/universe.yml
+
+# 2. 価格データ取得
+python scripts/core/download_prices.py --universe data/intermediate/universe/latest_universe.parquet
+
+# 3. TOPIXデータ構築
+python scripts/tools/build_index_tpx_daily.py
+
+# 4. 特徴量構築
+python scripts/core/build_features.py
+
+# 5. ポートフォリオ構築（運用終点生成）
+python scripts/core/build_portfolio.py
+```
+
+### 運用終点
+
+実行が成功すると、以下のファイルが生成されます：
+
+- **`data/processed/daily_portfolio_guarded.parquet`** - **運用終点（Executionが読む正本）**
+  - `weight` 列を含み、実運用で直接使用可能
+  - 最新日（latest date）の行を読み込んで使用
+
+**詳細:**
+- `docs/core_flow_table.md` - 実行順序と入出力の詳細
+- `docs/pipeline_graph.md` - パイプライン依存図
+
+---
+
+### cross4 weights版検証フロー（研究用）
+
+weights版cross4と既存return合成cross4の一致検証を行う場合：
+
+**一括実行（推奨）:**
+
+```bash
+# ①→②→③→④を自動実行
+python scripts/analysis/run_cross4_weights_verification.py
+```
+
+**個別実行（詳細確認が必要な場合）:**
+
+```bash
+# ① variant別/horizon別のweightsを生成
+python scripts/analysis/generate_variant_weights.py --variant rank --horizon 1 --ladder nonladder
+python scripts/analysis/generate_variant_weights.py --variant rank --horizon 5 --ladder nonladder
+python scripts/analysis/generate_variant_weights.py --variant rank --horizon 10 --ladder nonladder
+python scripts/analysis/generate_variant_weights.py --variant rank --horizon 60 --ladder ladder
+python scripts/analysis/generate_variant_weights.py --variant rank --horizon 90 --ladder ladder
+python scripts/analysis/generate_variant_weights.py --variant rank --horizon 120 --ladder ladder
+
+python scripts/analysis/generate_variant_weights.py --variant zdownvol --horizon 1 --ladder nonladder
+python scripts/analysis/generate_variant_weights.py --variant zdownvol --horizon 5 --ladder nonladder
+python scripts/analysis/generate_variant_weights.py --variant zdownvol --horizon 10 --ladder nonladder
+python scripts/analysis/generate_variant_weights.py --variant zdownvol --horizon 60 --ladder ladder
+python scripts/analysis/generate_variant_weights.py --variant zdownvol --horizon 90 --ladder ladder
+python scripts/analysis/generate_variant_weights.py --variant zdownvol --horizon 120 --ladder ladder
+
+# ② cross4 target weightsを生成
+python scripts/analysis/build_cross4_target_weights.py
+# → 出力: data/processed/weights/cross4_target_weights.parquet
+
+# ③ weights→returnsを計算
+python scripts/analysis/backtest_from_weights.py
+# → 出力: data/processed/weights_bt/cross4_from_weights.parquet
+
+# ④ 一致検証
+python scripts/analysis/verify_cross4_equivalence.py
+# → 出力: research/reports/cross4_weights_equivalence.csv
+# → 出力: research/reports/cross4_weights_equivalence_top20_diff.csv（FAIL時）
+# → 出力: research/reports/cross4_weights_top_diff_date_{YYYYMMDD}.csv（FAIL時）
+```
+
+**詳細:**
+- `docs/cross4_weights_implementation_status.md` - 実装状況サマリ
+- `docs/ladder_specification.md` - ladder仕様
+
+**比較・集計（実行後）:**
+
+```bash
+# cross4 returnsの比較・集計
+python scripts/analysis/compare_cross4_returns.py
+# → 出力: research/reports/cross4_returns_comparison_stats.csv
+# → 出力: research/reports/cross4_returns_comparison_diff.csv
+# → 出力: research/reports/cross4_returns_comparison_detail.parquet
+
+# 累積リターン差分の月次分析
+python scripts/analysis/analyze_cross4_cumret_diff_monthly.py
+# → 出力: research/reports/cross4_cumret_diff_monthly.csv
+# → 出力: research/reports/cross4_cumret_diff_expansion_periods.csv
+# → 出力: research/reports/cross4_cumret_diff_yearly.csv
+```
+
+---
+
+### 評価フロー（オプション）
+
+評価・分析が必要な場合：
+
+```bash
+# 評価パイプライン実行（評価・分析用）
 python scripts/core/run_equity01_eval.py
 ```
 
@@ -85,13 +189,14 @@ python scripts/core/run_equity01_eval.py
 2. **ペーパートレード + 相対α計算** (`calc_alpha_beta`)
 3. **Rolling相対α計算** (`rolling_relative_alpha`)
 
-### 実行結果
-
-実行が成功すると、以下のファイルが生成されます：
-
+**生成ファイル（評価用）:**
 - `data/processed/index_tpx_daily.parquet` - TOPIX日次リターン
 - `data/processed/paper_trade_with_alpha_beta.parquet` - ペーパートレード結果 + 相対α
 - `data/processed/rolling_relative_alpha.parquet` - Rolling相対α（10/20/60/120日）
+
+**注意:**
+- 評価フローは運用終点ではない（評価・分析用）
+- 運用終点は `build_portfolio.py` で生成される `daily_portfolio_guarded.parquet`
 
 ## 統合評価レポート生成（オプション）
 
@@ -253,8 +358,33 @@ equity01/
 
 ## 実行エントリポイント
 
-- **core**: `scripts/core/run_equity01_eval.py` - 基本評価パイプライン
-- **analysis**: `scripts/analysis/run_eval_report.py` - 統合評価レポート生成
+### 運用フロー（core完結）
+
+- **運用終点生成**: `scripts/core/build_portfolio.py` - ポートフォリオ構築
+  - 出力: `data/processed/daily_portfolio_guarded.parquet`（Executionが読む正本）
+  - Executionはこのファイルの最新日を読む
+
+### 評価・分析
+
+- **評価パイプライン**: `scripts/core/run_equity01_eval.py` - 基本評価パイプライン（評価用）
+- **統合評価レポート**: `scripts/analysis/run_eval_report.py` - 統合評価レポート生成
+
+### 研究用（analysis側）
+
+以下のスクリプトは **研究用：バックテスト/アンサンブル成績生成** であり、**執行用のtarget weightは生成しない**：
+
+- `scripts/analysis/run_all_rank_only.py` - rank-onlyバックテスト実行
+- `scripts/analysis/run_all_zdownvol.py` - z_downvol (Variant E) バックテスト実行
+- `scripts/analysis/ensemble_rank_only.py` - rank-onlyアンサンブル生成
+- `scripts/analysis/ensemble_variant_cross4.py` - cross4アンサンブル生成
+
+**重要:**
+- これらはcoreに依存して良い（core生成物を読み込む）
+- **coreへ書き戻し（生成物をcoreが読む）は禁止**
+- 執行用のtarget weightは生成しない
+
+**詳細:**
+- `docs/analysis_research_pipeline.md` - analysis研究フロー
 
 ## データ管理ルール
 
