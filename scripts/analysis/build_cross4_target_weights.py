@@ -33,31 +33,23 @@ if str(ROOT_DIR) not in sys.path:
 import pandas as pd
 import numpy as np
 
-# 既存のensemble_variant_cross4.pyから設定をインポート
-try:
-    from scripts.analysis.ensemble_variant_cross4 import (
-        VARIANTS,
-        VARIANT_WEIGHTS,
-        WEIGHTS as HORIZON_WEIGHTS,
-    )
-except ImportError:
-    # fallback: 直接定義
-    VARIANTS = {
-        "rank": "rank_only (Variant B)",
-        "zdownvol": "z_downvol (Variant E)",
-    }
-    VARIANT_WEIGHTS = {
-        "rank": 0.75,  # Variant B (rank_only)
-        "zdownvol": 0.25,  # Variant E (z_downvol)
-    }
-    HORIZON_WEIGHTS = {
-        (1, "nonladder"): 0.15,
-        (5, "nonladder"): 0.15,
-        (10, "nonladder"): 0.20,
-        (60, "ladder"): 0.10,
-        (90, "ladder"): 0.20,
-        (120, "ladder"): 0.20,
-    }
+# 設定を直接定義（ensemble_variant_cross4.pyはdeprecatedに移動したため）
+VARIANTS = {
+    "rank": "rank_only (Variant B)",
+    "zdownvol": "z_downvol (Variant E)",
+}
+VARIANT_WEIGHTS = {
+    "rank": 0.75,  # Variant B (rank_only)
+    "zdownvol": 0.25,  # Variant E (z_downvol)
+}
+HORIZON_WEIGHTS = {
+    (1, "nonladder"): 0.15,
+    (5, "nonladder"): 0.15,
+    (10, "nonladder"): 0.20,
+    (60, "ladder"): 0.10,
+    (90, "ladder"): 0.20,
+    (120, "ladder"): 0.20,
+}
 
 DATA_DIR = Path("data/processed")
 WEIGHTS_DIR = DATA_DIR / "weights"

@@ -93,7 +93,7 @@ def main() -> None:
     # 注意: この機能は analysis/run_eval_report.py に移行しました
     if args.horizon_ensemble:
         print("[WARN] --horizon-ensemble オプションは analysis/run_eval_report.py に移行しました")
-        print("  実行方法: python scripts/analysis/run_eval_report.py --horizon-ensemble")
+        print("  実行方法: python deprecated/2025Q4_pre_weights_fix/run_eval_report.py --horizon-ensemble (deprecated)")
         sys.exit(0)
     
     # 通常の評価パイプライン（従来版）
@@ -134,7 +134,7 @@ def main() -> None:
     print("\n=== STEP 4: 基本評価完了 ===")
     print("[OK] 基本評価パイプライン完了")
     print("\n注意: 月次集計・ホライゾンアンサンブルは別コマンドで実行してください:")
-    print("  python scripts/analysis/run_eval_report.py")
+    print("  python deprecated/2025Q4_pre_weights_fix/run_eval_report.py (deprecated)")
     
     print("\n" + "=" * 60)
     print("全ての処理が完了しました！")

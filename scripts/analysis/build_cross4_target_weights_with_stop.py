@@ -76,62 +76,21 @@ def load_cross4_weights() -> pd.DataFrame:
     return df
 
 
-def load_cross4_returns_for_stop(force_rebuild: bool = True) -> pd.DataFrame:
+def load_cross4_returns_for_stop(force_rebuild: bool = False) -> pd.DataFrame:
     """
     STOP条件計算用のcross4 returnsを読み込む
     
     Parameters
     ----------
     force_rebuild : bool
-        Trueの場合、rebuild_port_ret_from_weights()を使って再構築（eval_stop_regimes.pyと統一）
+        互換性のための引数（現在は未使用。既存のreturnsファイルを読み込む）
     
     Returns
     -------
     pd.DataFrame
         trade_date, port_ret_cc, tpx_ret_cc を含むDataFrame
     """
-    # eval_stop_regimes.pyと統一するため、rebuild_port_ret_from_weights()を使用（デフォルト）
-    if force_rebuild:
-        try:
-            from scripts.analysis.rebuild_port_ret_from_weights import rebuild_port_ret_from_weights
-            rebuild_result = rebuild_port_ret_from_weights(use_adj_close=True, use_weight_lag=True)
-            port_ret = rebuild_result["port_ret"]
-            
-            # TOPIXリターンを読み込む
-            tpx_path = DATA_DIR / "index_tpx_daily.parquet"
-            if not tpx_path.exists():
-                raise FileNotFoundError(f"TOPIXリターンファイルが見つかりません: {tpx_path}")
-            
-            df_tpx = pd.read_parquet(tpx_path)
-            tpx_date_col = "trade_date" if "trade_date" in df_tpx.columns else "date"
-            df_tpx[tpx_date_col] = pd.to_datetime(df_tpx[tpx_date_col])
-            df_tpx = df_tpx.set_index(tpx_date_col).sort_index()
-            
-            if "tpx_ret_cc" not in df_tpx.columns:
-                raise KeyError(f"TOPIXリターン列が見つかりません: {df_tpx.columns.tolist()}")
-            
-            tpx_ret = df_tpx["tpx_ret_cc"]
-            
-            # インデックスで揃える（inner join）
-            common_index = port_ret.index.intersection(tpx_ret.index)
-            port_ret = port_ret.loc[common_index]
-            tpx_ret = tpx_ret.loc[common_index]
-            
-            # DataFrameにまとめる
-            df_result = pd.DataFrame({
-                "trade_date": common_index,
-                "port_ret_cc": port_ret.values,
-                "tpx_ret_cc": tpx_ret.values,
-            })
-            
-            print(f"[INFO] Rebuilt cross4 returns from daily_portfolio_guarded + prices: {len(df_result)} days")
-            return df_result
-        except Exception as e:
-            print(f"[WARN] rebuild_port_ret_from_weights() failed: {e}")
-            print("[WARN] フォールバック: 既存のreturnsファイルを使用します")
-            # フォールバックに進む
-    
-    # フォールバック: 既存のreturnsファイル（互換性のため）
+    # 既存のreturnsファイルを使用（weights_bt/cross4_from_weights.parquet）
     weights_bt_path = DATA_DIR / "weights_bt" / "cross4_from_weights.parquet"
     if weights_bt_path.exists():
         try:

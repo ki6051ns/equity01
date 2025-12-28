@@ -65,7 +65,8 @@ def generate_weights_for_variant(
     - ladder: 毎日weightsを生成し、直近h本の平均を使用（全営業日のweightsを生成）
       ※ 参照: scripts/analysis/horizon_ensemble.py:101-357 (backtest_with_horizon)
     """
-    from scripts.core.event_guard import EventGuard
+    # EventGuardは未完成のため削除（deprecated/2025Q4_pre_weights_fix/に移動）
+    # from scripts.core.event_guard import EventGuard
     from scripts.tools.weights_cleaning import clean_target_weights
     from scripts.tools import data_loader
     
@@ -103,8 +104,8 @@ def generate_weights_for_variant(
     config.max_names_per_day = 30  # 既存ロジックに合わせる
     config.weighting_scheme = "equal"  # 等ウェイト
     
-    # EventGuardを初期化
-    guard = EventGuard()
+    # EventGuardは未完成のため削除（deprecated/2025Q4_pre_weights_fix/に移動）
+    # guard = EventGuard()
     
     # 価格データを読み込む（ladder方式のクリーニングに必要）
     prices = data_loader.load_prices()
@@ -131,10 +132,10 @@ def generate_weights_for_variant(
             if today_feat.empty:
                 continue
             
-            # 決算銘柄を除外
-            excluded = guard.get_excluded_symbols(date.date())
-            if excluded:
-                today_feat = today_feat[~today_feat["symbol"].isin(excluded)]
+            # EventGuardは未完成のため決算除外機能を削除（deprecated/2025Q4_pre_weights_fix/に移動）
+            # excluded = guard.get_excluded_symbols(date.date())
+            # if excluded:
+            #     today_feat = today_feat[~today_feat["symbol"].isin(excluded)]
             
             if today_feat.empty:
                 continue
@@ -234,10 +235,10 @@ def generate_weights_for_variant(
                         })
                 continue
             
-            # 決算銘柄を除外
-            excluded = guard.get_excluded_symbols(date.date())
-            if excluded:
-                today_feat = today_feat[~today_feat["symbol"].isin(excluded)]
+            # EventGuardは未完成のため決算除外機能を削除（deprecated/2025Q4_pre_weights_fix/に移動）
+            # excluded = guard.get_excluded_symbols(date.date())
+            # if excluded:
+            #     today_feat = today_feat[~today_feat["symbol"].isin(excluded)]
             
             if today_feat.empty:
                 # 決算除外後も空の場合は、キューがあれば前回weightsを維持

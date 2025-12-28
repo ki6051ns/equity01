@@ -1,5 +1,5 @@
 # equity01: AI駆動・日本株インテリジェント日次トレーディングシステム  
-**Version 3.0 / Updated: 2025-12-20（stg移行完了版）**
+**Version 3.1 / Updated: 2025-12-28（stg整理完了版）**
 
 equity01 は **AI駆動 × 正統クオンツ**によって構築された  
 日本株向け **インテリジェント日次トレーディングシステム**です。
@@ -7,8 +7,9 @@ equity01 は **AI駆動 × 正統クオンツ**によって構築された
 ALPHAERS（統合戦略）の中核である **Equity Strategy Layer** を担い、  
 **透明性・説明可能性・再現性・堅牢性** を最優先に設計されています。
 
-本バージョン（v3.0）は **stg移行完了版** であり、  
-**実行に必要な最小構成（MVP）** を固定し、**再現可能な実行入口** を確保しました。
+本バージョン（v3.1）は **stg整理完了版** であり、  
+**core（実運営正本）・analysis（weights研究）・deprecated（評価・比較・試行錯誤）の三層分離** を確立し、  
+**実行に必要な最小構成（core 6本・analysis 5本）** を固定しました。
 
 ---
 
@@ -108,15 +109,16 @@ python scripts/core/build_portfolio.py
 
 ---
 
-### cross4 weights版検証フロー（研究用）
+### cross4 weights版検証フロー（研究用・非推奨）
 
-weights版cross4と既存return合成cross4の一致検証を行う場合：
+**注意**: 以下の検証フローは`deprecated/2025Q4_pre_weights_fix/`に移動しました。  
+weights版cross4と既存return合成cross4の一致検証は既に完了しており、現在はweights型を正とする運用フローを使用してください。
 
-**一括実行（推奨）:**
+**（参考）旧検証フロー（deprecated）:**
 
 ```bash
-# ①→②→③→④を自動実行
-python scripts/analysis/run_cross4_weights_verification.py
+# ①→②→③→④を自動実行（deprecated/2025Q4_pre_weights_fix/に移動）
+python deprecated/2025Q4_pre_weights_fix/run_cross4_weights_verification.py
 ```
 
 **個別実行（詳細確認が必要な場合）:**
@@ -145,8 +147,8 @@ python scripts/analysis/build_cross4_target_weights.py
 python scripts/analysis/backtest_from_weights.py
 # → 出力: data/processed/weights_bt/cross4_from_weights.parquet
 
-# ④ 一致検証
-python scripts/analysis/verify_cross4_equivalence.py
+# ④ 一致検証（deprecated/2025Q4_pre_weights_fix/に移動）
+python deprecated/2025Q4_pre_weights_fix/verify_cross4_equivalence.py
 # → 出力: research/reports/cross4_weights_equivalence.csv
 # → 出力: research/reports/cross4_weights_equivalence_top20_diff.csv（FAIL時）
 # → 出力: research/reports/cross4_weights_top_diff_date_{YYYYMMDD}.csv（FAIL時）
@@ -156,62 +158,25 @@ python scripts/analysis/verify_cross4_equivalence.py
 - `docs/cross4_weights_implementation_status.md` - 実装状況サマリ
 - `docs/ladder_specification.md` - ladder仕様
 
-**比較・集計（実行後）:**
-
-```bash
-# cross4 returnsの比較・集計
-python scripts/analysis/compare_cross4_returns.py
-# → 出力: research/reports/cross4_returns_comparison_stats.csv
-# → 出力: research/reports/cross4_returns_comparison_diff.csv
-# → 出力: research/reports/cross4_returns_comparison_detail.parquet
-
-# 累積リターン差分の月次分析
-python scripts/analysis/analyze_cross4_cumret_diff_monthly.py
-# → 出力: research/reports/cross4_cumret_diff_monthly.csv
-# → 出力: research/reports/cross4_cumret_diff_expansion_periods.csv
-# → 出力: research/reports/cross4_cumret_diff_yearly.csv
-```
+**注意**: 検証スクリプト（`verify_cross4_equivalence.py`, `compare_cross4_returns.py`, `analyze_cross4_cumret_diff_monthly.py`）は`deprecated/2025Q4_pre_weights_fix/`に移動しました。weights型への移行は完了しており、現在はweights型を正とする運用フローを使用してください。
 
 ---
 
-### 評価フロー（オプション）
+### 評価フロー（非推奨・deprecated）
 
-評価・分析が必要な場合：
+**注意**: 以下の評価フロー関連スクリプトは `deprecated/2025Q4_pre_weights_fix/` に移動しました。  
+stgではweights型（core）のみを使用してください。
 
-```bash
-# 評価パイプライン実行（評価・分析用）
-python scripts/core/run_equity01_eval.py
-```
+- `scripts/core/run_equity01_eval.py` → deprecated
+- `scripts/core/calc_alpha_beta.py` → deprecated
+- `scripts/core/build_dynamic_portfolio.py` → deprecated（ensemble系に依存）
+- `scripts/core/build_regime_hmm.py` → deprecated（horizon_ensemble_variant_cross4.parquetに依存、モニタリング用途のみ）
+- `scripts/core/event_guard.py` → deprecated（ロジック構築未完成）
 
-このコマンドで以下が順次実行されます：
+## 統合評価レポート生成（非推奨・deprecated）
 
-1. **TOPIXインデックスデータの更新** (`build_index_tpx_daily`)
-2. **ペーパートレード + 相対α計算** (`calc_alpha_beta`)
-3. **Rolling相対α計算** (`rolling_relative_alpha`)
-
-**生成ファイル（評価用）:**
-- `data/processed/index_tpx_daily.parquet` - TOPIX日次リターン
-- `data/processed/paper_trade_with_alpha_beta.parquet` - ペーパートレード結果 + 相対α
-- `data/processed/rolling_relative_alpha.parquet` - Rolling相対α（10/20/60/120日）
-
-**注意:**
-- 評価フローは運用終点ではない（評価・分析用）
-- 運用終点は `build_portfolio.py` で生成される `daily_portfolio_guarded.parquet`
-
-## 統合評価レポート生成（オプション）
-
-詳細な月次集計・統計レポートを生成する場合：
-
-```bash
-python scripts/analysis/run_eval_report.py
-```
-
-**注意**: このコマンドは `core/run_equity01_eval.py` の後に実行してください。
-
-### 出力先
-
-- `research/reports/summary_stats.csv` - 基本統計
-- `research/reports/monthly_performance.csv` - 月次パフォーマンス
+**注意**: `scripts/analysis/run_eval_report.py` は `deprecated/2025Q4_pre_weights_fix/` に移動しました。  
+stgではweights型（core）のみを使用してください。
 
 ---
 
@@ -316,11 +281,6 @@ equity01/
 │   │   ├── run_scoring.py
 │   │   ├── scoring_engine.py
 │   │   ├── build_portfolio.py
-│   │   ├── build_dynamic_portfolio.py
-│   │   ├── event_guard.py
-│   │   ├── build_regime_hmm.py
-│   │   ├── calc_alpha_beta.py
-│   │   └── run_equity01_eval.py      # 実行エントリポイント
 │   │
 │   ├── analysis/          # 研究・検証・可視化用（stgで隔離、prdには持ち込まない）
 │   │   ├── run_eval_report.py        # 統合評価レポート生成
@@ -364,27 +324,34 @@ equity01/
   - 出力: `data/processed/daily_portfolio_guarded.parquet`（Executionが読む正本）
   - Executionはこのファイルの最新日を読む
 
-### 評価・分析
+### stg整合性チェック
 
-- **評価パイプライン**: `scripts/core/run_equity01_eval.py` - 基本評価パイプライン（評価用）
-- **統合評価レポート**: `scripts/analysis/run_eval_report.py` - 統合評価レポート生成
+- **唯一のRunエントリポイント**: `scripts/stg_sanity_check.py` - stgの最低限整合性チェック（import + 軽い存在チェック）
+  - CursorのRunはこのスクリプトのみを使用
+  - 個別scriptをRunしたくなったら「それはstgではなくresearchに戻っている」と判断
+
+### 評価・分析（deprecated）
+
+**注意**: 以下のスクリプトは `deprecated/2025Q4_pre_weights_fix/` に移動しました：
+- `run_equity01_eval.py` - 基本評価パイプライン
+- `run_eval_report.py` - 統合評価レポート生成
+- その他eval型・検証系スクリプト（約50ファイル）
+
+deprecated配下は参照しない・直さない・思い出さない方針です。必要になったら理由を書いてcore/analysisに昇格させます。
 
 ### 研究用（analysis側）
 
-以下のスクリプトは **研究用：バックテスト/アンサンブル成績生成** であり、**執行用のtarget weightは生成しない**：
+**現在の構成**:
+- `scripts/analysis/generate_variant_weights.py` - variant別/horizon別weights生成
+- `scripts/analysis/build_cross4_target_weights.py` - cross4 target weights生成
+- `scripts/analysis/build_cross4_target_weights_with_stop.py` - STOP付cross4 weights生成
+- `scripts/analysis/backtest_from_weights.py` - weights→returns計算
+- `scripts/analysis/backtest_from_weights_with_stop.py` - STOP付weights→returns計算
 
-- `scripts/analysis/run_all_rank_only.py` - rank-onlyバックテスト実行
-- `scripts/analysis/run_all_zdownvol.py` - z_downvol (Variant E) バックテスト実行
-- `scripts/analysis/ensemble_rank_only.py` - rank-onlyアンサンブル生成
-- `scripts/analysis/ensemble_variant_cross4.py` - cross4アンサンブル生成
+詳細は `docs/stg_file_inventory.md` を参照。
 
-**重要:**
-- これらはcoreに依存して良い（core生成物を読み込む）
-- **coreへ書き戻し（生成物をcoreが読む）は禁止**
-- 執行用のtarget weightは生成しない
-
-**詳細:**
-- `docs/analysis_research_pipeline.md` - analysis研究フロー
+**注意**: 旧スクリプト（ensemble系、run_all系、検証系等）は全て `deprecated/2025Q4_pre_weights_fix/` に移動しました。  
+deprecated配下は参照しない・直さない・思い出さない方針です。
 
 ## データ管理ルール
 
@@ -414,8 +381,8 @@ equity01 の過去実績（2016-2025）：
 # 構文チェック
 python -m py_compile scripts/core/*.py
 
-# importチェック
-python scripts/core/run_equity01_eval.py --help
+# importチェック（stg sanity checkを使用）
+python scripts/stg_sanity_check.py
 ```
 
 ## データが見つからない場合
@@ -433,6 +400,18 @@ python scripts/core/run_equity01_eval.py --help
 ---
 
 # 📝 変更履歴
+
+- **v3.1 (2025-12-28)**: stg整理完了版（3rd_commit）
+  - **三層分離の確立**: core（実運営正本）、analysis（weights研究）、deprecated（評価・比較・試行錯誤）の明確な境界を確立
+  - **core 6本・analysis 5本に集約**: 人間が全体像を把握できる規模（合計11本）に整理
+  - **運用終点の一本化**: `daily_portfolio_guarded.parquet` を唯一の運用終点として確立
+  - **eval型とweights型の完全分離**: eval型スクリプト（`run_equity01_eval.py`, `calc_alpha_beta.py`, `build_dynamic_portfolio.py`, `build_regime_hmm.py`, `event_guard.py`）をdeprecatedに移動
+  - **Runエントリポイントの一本化**: `scripts/stg_sanity_check.py` を唯一のRunエントリポイントに設定（CursorのRun地獄を解消）
+  - **deprecated隔離ルールの確立**: deprecated配下は参照しない・直さない・思い出さない方針を明確化
+  - **port_ret_cc定義揺れの解消**: 旧パイプライン由来の`port_ret_cc`使用スクリプトを全てdeprecatedに移動
+  - **ensemble/run_all系の隔離**: 試行錯誤・検証スクリプトを全て`deprecated/2025Q4_pre_weights_fix/`に移動
+  - 詳細は `docs/stg_file_inventory.md` および `deprecated/2025Q4_pre_weights_fix/README.md` を参照
+  - **次のフェーズ**: stgフェーズは完了、prd-prep/prd_skeletonフェーズへ移行準備完了
 
 - **v3.0 (2025-12-20)**: stg移行完了版
   - MVP最小構成（core 11本）を固定
@@ -454,4 +433,4 @@ python scripts/core/run_equity01_eval.py --help
 
 **Prepared by**  
 equity01 / Strategy Core Layer  
-Research Plan v3.0（stg移行完了版 / Updated 2025-12-20）
+Research Plan v3.1（stg整理完了版 / Updated 2025-12-28）
