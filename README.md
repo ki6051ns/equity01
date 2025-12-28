@@ -1,5 +1,5 @@
 # equity01: AI駆動・日本株インテリジェント日次トレーディングシステム  
-**Version 3.1 / Updated: 2025-12-28（stg整理完了版）**
+**Version 3.2 / Updated: 2025-12-28（4th_commit: stg完了 → prod準備フェーズ移行）**
 
 equity01 は **AI駆動 × 正統クオンツ**によって構築された  
 日本株向け **インテリジェント日次トレーディングシステム**です。
@@ -7,7 +7,11 @@ equity01 は **AI駆動 × 正統クオンツ**によって構築された
 ALPHAERS（統合戦略）の中核である **Equity Strategy Layer** を担い、  
 **透明性・説明可能性・再現性・堅牢性** を最優先に設計されています。
 
-本バージョン（v3.1）は **stg整理完了版** であり、  
+本バージョン（v3.2）は **4th_commit（stg完了 → prod準備フェーズ移行）** であり、  
+**coreパイプラインを「運用資産」として成立**させ、  
+**空状態から毎日再生成できる運用資産**として確立しました。
+
+**前バージョン（v3.1）**: **stg整理完了版** で、  
 **core（実運営正本）・analysis（weights研究）・deprecated（評価・比較・試行錯誤）の三層分離** を確立し、  
 **実行に必要な最小構成（core 6本・analysis 5本）** を固定しました。
 
@@ -88,12 +92,55 @@ python scripts/core/download_prices.py --universe data/intermediate/universe/lat
 # 3. TOPIXデータ構築
 python scripts/tools/build_index_tpx_daily.py
 
-# 4. 特徴量構築
+# 4. 特徴量構築（内部でスコアリングも実行される）
+# 【② run_scoring 二重実行の回避】build_features.py内でcompute_scores_allを呼び出してスコアリングを実行
+# run_scoring.pyは別途実行しない（二重実行を回避）
 python scripts/core/build_features.py
 
 # 5. ポートフォリオ構築（運用終点生成）
 python scripts/core/build_portfolio.py
 ```
+
+### Windowsタスクスケジューラの運用設定
+
+`scripts/run_equity01_core.ps1`をWindowsタスクスケジューラから自動実行する場合の推奨設定：
+
+#### 基本設定
+- **プログラム**: `powershell.exe`
+- **引数**: `-ExecutionPolicy Bypass -NoProfile -File "C:\path\to\equity01\scripts\run_equity01_core.ps1"`
+- **開始ディレクトリ**: プロジェクトルート（`C:\path\to\equity01`）
+
+#### 実行スケジュール
+- **実行時間帯**: 営業日の朝（例：平日 8:00）
+- **実行頻度**: 毎営業日
+
+#### タイムアウト設定
+- **タスクのタイムアウト**: 2時間（120分）
+  - 通常は10-15分程度で完了するが、ネットワーク遅延等を考慮して余裕を持たせる
+
+#### 失敗時の再実行
+- **再実行**: 基本なし（自動リトライなし）
+  - 失敗時はログを確認して手動対応
+  - 必要に応じて手動で再実行
+
+#### ログ管理
+- **ログファイル**: `logs/run_equity01_core_YYYYMMDD.log`
+- **保管期間**: 30日（推奨）
+- **ローテーション**: 古いログは自動削除またはアーカイブ
+  - PowerShellスクリプトで30日以上古いログを削除する処理を追加可能
+
+#### エラー通知（オプション）
+- タスクスケジューラの「履歴」タブで失敗を確認
+- 必要に応じて、失敗時にメール通知を設定
+
+#### universe_builderのyfinance取得失敗時の挙動
+- **現在の設定**: A案（堅牢）を採用
+  - yfinance取得失敗時は、前回の`latest_universe.parquet`を使用して継続
+  - ログに`[ERROR]`を記録し、`[FALLBACK]`として前回データを使用
+  - 運用は継続されるが、ログで確認可能
+- **代替案**: B案（品質）
+  - yfinance取得失敗時は`ExitCode!=0`で停止（その日は運用しない）
+  - より厳格だが、データ品質を優先
 
 ### 運用終点
 
@@ -101,11 +148,20 @@ python scripts/core/build_portfolio.py
 
 - **`data/processed/daily_portfolio_guarded.parquet`** - **運用終点（Executionが読む正本）**
   - `weight` 列を含み、実運用で直接使用可能
-  - 最新日（latest date）の行を読み込んで使用
+  - **【③ 最重要】実運用では `daily_portfolio_guarded.parquet` の `date` 列の `max(date)` の行のみを使用する（契約レベル）**
+  - date列は正規化・ソート済み（timezoneなし、昇順）
+  - latest専用ファイル作成・完了フラグ・営業日判定は不要
 
 **詳細:**
 - `docs/core_flow_table.md` - 実行順序と入出力の詳細
 - `docs/pipeline_graph.md` - パイプライン依存図
+
+**運用安定化の設計原則:**
+- **【③ 最重要】latest解釈（契約レベル）**: 実運用では `daily_portfolio_guarded.parquet` の `date` 列の `max(date)` の行のみを使用する
+- **【① TOPIX依存】**: build_features.pyでTOPIXデータを参照（欠損時は警告を出力、無言スルー禁止）
+- **【② run_scoring 二重実行】**: build_features.py内でcompute_scores_allを呼び出し（実行フローは変更なし）
+- **【④ 途中生成物】**: 途中失敗時に生成物が残る可能性があるが、Executionは`daily_portfolio_guarded.parquet`の`date`列`max(date)`行のみ使用するため問題ない
+- **【⑤ 祝日・価格未更新日】**: download_prices.pyで取得不能時は警告を出力して継続（営業日カレンダー実装は不要）
 
 ---
 
@@ -401,6 +457,55 @@ python scripts/stg_sanity_check.py
 
 # 📝 変更履歴
 
+- **v3.2 (2025-12-28)**: 4th_commit（stg完了 → prod準備フェーズ移行）
+  - **stgフェーズの目的と到達点**:
+    - coreパイプラインを「運用資産」として成立
+    - 過去生成物・残骸依存を完全排除
+    - Windowsタスクスケジューラでの自動実行を安定化
+    - 空に近い data/ 状態から ps1 が完走
+    - ExitCode 正本主義による誤判定排除
+    - latest 解釈・生成物・運用終点がすべて契約化
+  - **core / data 構成の確定**:
+    - core最小構成: universe_builder.py, download_prices.py, build_index_tpx_daily.py, build_features.py, run_scoring.py（build_features内で実行）, build_portfolio.py
+    - 運用終点: `data/processed/daily_portfolio_guarded.parquet`（date.max()の行のみ使用）
+    - 補助生成物: daily_feature_scores.parquet, index_tpx_daily.parquet
+    - 中間生成物: latest_universe.parquet, latest_scores.parquet
+    - 履歴: `data/intermediate/universe/history/YYYYMMDD_universe.parquet`
+  - **latest 解釈の契約固定（最重要）**:
+    - build_portfolio.py出力時にdateをdatetime（timezoneなし）に正規化・昇順ソートを保証
+    - execution側は常にdate.max()の行のみを使用
+    - 日付ファイル名・完了フラグ・営業日判定は不要
+  - **残骸依存の完全排除**:
+    - data/raw/equities/ parquet依存を排除
+    - data_loader.load_prices()をdata/raw/prices/prices_*.csv優先に修正
+    - stgドライランでprices/universe/scoring/features/portfolioが全て再生成されることを確認
+  - **run_scoringの扱い確定**:
+    - 二重実行を排除（ps1からrun_scoring.pyを削除）
+    - build_features.py内でのみ実行
+    - 成否判定はExitCodeのみ（stdout/stderr非依存）
+  - **universe_builderの高速化（致命的課題の解消）**:
+    - 実行時間: 約25分 → 約20秒
+    - 処理ステップごとの[TIMING]ログ追加
+    - I/O最適化（必要列のみ）、yfinance複数銘柄バッチ取得、lookback短縮、parquet書き込み最適化（snappy）
+    - 遅延要因はyfinance取得と特定済み
+  - **universe_builderのフォールバック設計（運用堅牢化）**:
+    - yfinance取得失敗時は前回latest_universe.parquetを使用して継続
+    - [ERROR]/[FALLBACK]を明示ログ出力
+    - 前回universeも読めない場合のみExitCode=2で停止
+    - A案（堅牢）を正式採用（B案はドキュメント明記）
+  - **PowerShell/タスクスケジューラの安定化**:
+    - ExitCode正本主義に完全移行（$LASTEXITCODEリセット廃止、stdout/stderr文字列による誤判定排除）
+    - タスクスケジューラ運用条件をドキュメント化（平日朝実行、タイムアウト120分、自動リトライなし）
+    - ログローテーション追加（30日以上前のrun_equity01_core_*.logを自動削除）
+  - **stgドライラン結果**:
+    - 空に近いdata状態から完走
+    - 実行時間: 約10分（task scheduler）
+    - latest date: 正常、Rows for latest: 想定通り、ExitCode: 0
+  - **現在位置と次フェーズ**:
+    - stg完了、運用安定性・再現性・自動実行を確認済み
+    - 今後（prod準備）: execution側I/F最終確認、date.max()行の扱い、行数＝取引対象数の解釈、ドライランでターゲットウェイトを蓄積、ドライラン由来のパフォーマンス評価、合格基準を満たした時点でprod移行
+  - **総括**: 「equity01-JPは実験コードではなく、空状態から毎日再生成できる"運用資産"になった」
+
 - **v3.1 (2025-12-28)**: stg整理完了版（3rd_commit）
   - **三層分離の確立**: core（実運営正本）、analysis（weights研究）、deprecated（評価・比較・試行錯誤）の明確な境界を確立
   - **core 6本・analysis 5本に集約**: 人間が全体像を把握できる規模（合計11本）に整理
@@ -433,4 +538,4 @@ python scripts/stg_sanity_check.py
 
 **Prepared by**  
 equity01 / Strategy Core Layer  
-Research Plan v3.1（stg整理完了版 / Updated 2025-12-28）
+Research Plan v3.2（4th_commit: stg完了 → prod準備フェーズ移行 / Updated 2025-12-28）

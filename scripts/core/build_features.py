@@ -7,12 +7,21 @@ import sys
 from pathlib import Path as PathLib
 
 # scripts ディレクトリをパスに追加
+# build_features.py は scripts/core/ にあるため、scripts/ をパスに追加
 SCRIPT_DIR = PathLib(__file__).resolve().parent.parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+# プロジェクトルートもパスに追加（scripts.core をインポートするため）
+PROJECT_ROOT = PathLib(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from tools.feature_builder import FeatureBuilderConfig, build_feature_matrix
 from scripts.core.scoring_engine import compute_scores_all, _zscore
+# 【② run_scoring 二重実行の可視化】
+# build_features.py 内で compute_scores_all を呼び出しているため、
+# run_scoring.py を別途実行する場合は二重実行となる可能性がある
+# 実行フローは変更しない（現状のまま）
 from tools import data_loader
 
 
@@ -66,6 +75,9 @@ def main():
     )
 
     # ---------- TOPIX データの読み込みとマージ ----------
+    # 【① TOPIX依存】TOPIX（日次指数リターン）を参照
+    # - データ欠損時は mkt_ret_1d = 0.0 でフォールバック（警告を出力）
+    # - 無言スルー禁止：データが見つからない場合は警告を出力
     tpx_path = Path("data/processed/index_tpx_daily.parquet")
     if tpx_path.exists():
         df_tpx = pd.read_parquet(tpx_path)

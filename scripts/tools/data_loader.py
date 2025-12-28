@@ -349,28 +349,48 @@ class DataLoader:
 def load_prices() -> pd.DataFrame:
     """
     日本株の価格データ（複数銘柄対応）。
-    期待する raw ディレクトリ構成:
-      data/raw/equities/*.parquet
+    期待する raw ディレクトリ構成（優先順位順）:
+      1. data/raw/prices/prices_{TICKER}.csv  （coreパイプラインで生成される）
+      2. data/raw/equities/*.parquet          （フォールバック）
 
     各ファイルは日足:
       date, open, high, low, close, adj_close(任意), volume(任意), turnover(任意)
 
     ファイル名の stem を symbol として使う想定。
+    例: data/raw/prices/prices_7203.T.csv -> symbol='7203.T'
     例: data/raw/equities/7203.T.parquet -> symbol='7203.T'
     """
-    base = Path("data/raw/equities")
-    files = sorted(list(base.glob("*.parquet")))
-
+    # 優先順位1: coreパイプラインで生成されるCSVファイル
+    prices_base = Path("data/raw/prices")
+    csv_files = sorted(list(prices_base.glob("prices_*.csv")))
+    
+    # 優先順位2: フォールバック（equities配下のparquetファイル）
+    equities_base = Path("data/raw/equities")
+    parquet_files = sorted(list(equities_base.glob("*.parquet"))) if equities_base.exists() else []
+    
+    files = csv_files if csv_files else parquet_files
+    
     if not files:
-        # フォールバック：従来の単一銘柄版（あなたの旧実装）をここに残しておいてもOK
         raise FileNotFoundError(
-            f"no parquet files found under {base}. "
-            "例: data/raw/equities/7203.T.parquet のように配置してください。"
+            f"価格データファイルが見つかりません。\n"
+            f"  - data/raw/prices/prices_*.csv または\n"
+            f"  - data/raw/equities/*.parquet\n"
+            f"のいずれかが必要です。"
         )
 
     frames = []
     for f in files:
-        df = pd.read_parquet(f)
+        # CSVファイルの場合
+        if f.suffix == ".csv":
+            df = pd.read_csv(f)
+            # 数値列を適切に変換（CSVから読み込んだ場合、文字列になる可能性がある）
+            numeric_cols = ["open", "high", "low", "close", "adj_close", "volume"]
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+        # Parquetファイルの場合
+        else:
+            df = pd.read_parquet(f)
 
         # ★ カラム名フラット化：MultiIndex や "('open','2413.T')" → "open" にする
         if isinstance(df.columns, pd.MultiIndex):
@@ -400,7 +420,12 @@ def load_prices() -> pd.DataFrame:
 
         # symbol 列が無ければファイル名から付ける
         if "symbol" not in df.columns:
-            symbol = f.stem  # 例: 7203.T
+            # CSVファイルの場合: prices_7203.T.csv -> 7203.T
+            # Parquetファイルの場合: 7203.T.parquet -> 7203.T
+            if f.suffix == ".csv" and f.stem.startswith("prices_"):
+                symbol = f.stem.replace("prices_", "")  # prices_7203.T -> 7203.T
+            else:
+                symbol = f.stem  # 7203.T
             df = df.copy()
             df["symbol"] = symbol
 

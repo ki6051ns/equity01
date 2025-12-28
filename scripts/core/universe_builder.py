@@ -82,9 +82,61 @@ def load_prices_local(prices_dir: str, tickers: List[str], asof: str, lookback: 
 def load_prices_yf(tickers: List[str], asof: str, lookback: int) -> Dict[str, pd.DataFrame]:
     import yfinance as yf
     end = pd.to_datetime(asof) + pd.Timedelta(days=1)
-    start = end - pd.tseries.offsets.BDay(int(math.ceil(lookback * 2)))
+    # 最適化: lookbackの2倍ではなく、1.2倍程度に短縮（必要な期間のみ取得）
+    start = end - pd.tseries.offsets.BDay(int(math.ceil(lookback * 1.2)))
     out: Dict[str, pd.DataFrame] = {}
 
+    # 最適化: バッチ取得を試行（yfinanceは複数銘柄を一度に取得できる場合がある）
+    if len(tickers) > 10:
+        try:
+            # バッチ取得を試行（失敗したら個別取得にフォールバック）
+            batch_data = yf.download(
+                tickers,
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                interval="1d",
+                auto_adjust=False,
+                progress=False,
+                threads=True,  # 並列化を有効化
+            )
+            if batch_data is not None and len(batch_data) > 0:
+                # バッチ取得が成功した場合の処理
+                for t in tickers:
+                    try:
+                        close_col = None
+                        vol_col = None
+                        if isinstance(batch_data.columns, pd.MultiIndex):
+                            # MultiIndexの場合
+                            if (t, "Close") in batch_data.columns:
+                                close_col = (t, "Close")
+                            if (t, "Volume") in batch_data.columns:
+                                vol_col = (t, "Volume")
+                        else:
+                            # 単一銘柄の場合
+                            if "Close" in batch_data.columns:
+                                close_col = "Close"
+                            if "Volume" in batch_data.columns:
+                                vol_col = "Volume"
+                        
+                        if close_col is not None and vol_col is not None:
+                            d = pd.DataFrame({"date": batch_data.index})
+                            d["close"] = pd.to_numeric(batch_data[close_col].values, errors="coerce")
+                            d["volume"] = pd.to_numeric(batch_data[vol_col].values, errors="coerce")
+                            d = d[["date", "close", "volume"]].dropna()
+                            if not d.empty:
+                                out[t] = d
+                    except Exception:
+                        pass
+                
+                # バッチ取得で取得できた銘柄は個別取得をスキップ
+                remaining = [t for t in tickers if t not in out]
+                if not remaining:
+                    return out
+                tickers = remaining
+        except Exception as e:
+            logging.warning(f"Batch download failed, falling back to individual downloads: {e}")
+
+    # 個別取得（バッチ取得が失敗した場合、または残りの銘柄）
     for t in tickers:
         try:
             d = yf.download(
@@ -173,6 +225,9 @@ def compute_liquidity(df: pd.DataFrame, lookback: int) -> float:
     return float(np.nanmean(turn.values))
 
 def main():
+    import time
+    start_time = time.time()
+    
     args = parse_args()
     cfg = read_yaml(args.config)
     asof = _resolve_asof(args.asof or cfg.get("asof"))
@@ -182,25 +237,91 @@ def main():
     setup_logger(cfg.get("logs_dir","logs"), asof)
     logging.info(f"Start universe build asof={asof} lookback={lookback} top_ratio={top_ratio}")
 
+    # 計測: JPX listings読み込み
+    step_start = time.time()
     listings = load_listings(cfg["inputs"]["listings_csv"])
+    logging.info(f"[TIMING] load_listings: {time.time() - step_start:.2f}秒")
     listings = listings[listings["market"].isin(cfg.get("markets",[]))]
     listings = listings[~listings["type"].isin(cfg.get("exclude_types",[]))]
     if cfg.get("exclude_tickers"):
         listings = listings[~listings["ticker"].isin(cfg["exclude_tickers"])]
 
+    # 計測: フィルタ処理
+    step_start = time.time()
     tickers = sorted(listings["ticker"].unique().tolist())
     logging.info(f"個別株銘柄数: {len(tickers)}銘柄")
+    logging.info(f"[TIMING] filter_listings: {time.time() - step_start:.2f}秒")
+    
     source = cfg["inputs"].get("source","auto").lower()
 
+    # 計測: 価格データ読み込み
+    step_start = time.time()
     prices = {}
     if source in ("local","auto"):
         prices.update(load_prices_local(cfg["inputs"]["prices_dir"], tickers, asof, lookback))
+        logging.info(f"[TIMING] load_prices_local: {time.time() - step_start:.2f}秒 (取得銘柄数: {len(prices)})")
     if source in ("yfinance","auto"):
         # 足りない銘柄のみyfinanceで補完
         missing = [t for t in tickers if t not in prices]
         if missing:
-            prices.update(load_prices_yf(missing, asof, lookback))
+            yf_start = time.time()
+            try:
+                prices.update(load_prices_yf(missing, asof, lookback))
+                yf_obtained = len([t for t in missing if t in prices])
+                logging.info(f"[TIMING] load_prices_yf: {time.time() - yf_start:.2f}秒 (取得銘柄数: {yf_obtained})")
+            except Exception as e:
+                # 【運用安定化】yfinance取得失敗時の挙動
+                # A案（堅牢）: 前回のlatest_universeを使って継続
+                # B案（品質）: ExitCode!=0で止める（その日は運用しない）
+                # 現在はA案を採用（運用継続性を優先）
+                logging.error(f"[ERROR] yfinance取得失敗: {e}")
+                logging.error(f"[ERROR] 前回のlatest_universeを使用して継続します")
+                
+                # 前回のlatest_universeを読み込む
+                out_dir = Path(cfg["output"]["dir"])
+                latest_path = out_dir / cfg["output"].get("latest_name", "latest_universe.parquet")
+                if latest_path.exists():
+                    try:
+                        latest_uni = pd.read_parquet(latest_path)
+                        logging.info(f"[FALLBACK] 前回のuniverseを使用: {len(latest_uni)}銘柄 (asof: {latest_uni['asof'].iloc[0] if 'asof' in latest_uni.columns and len(latest_uni) > 0 else 'N/A'})")
+                        # 前回のuniverseをそのまま出力（日付は更新しない）
+                        latest_uni["asof"] = asof  # 日付のみ更新
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        history_dir = out_dir / "history"
+                        history_dir.mkdir(parents=True, exist_ok=True)
+                        out_path = history_dir / f"{asof.replace('-','')}_universe.parquet"
+                        latest_uni.to_parquet(out_path, index=False, compression="snappy")
+                        
+                        # latestを更新
+                        if cfg["output"].get("write_latest_symlink", True):
+                            latest = out_dir / cfg["output"].get("latest_name", "latest_universe.parquet")
+                            try:
+                                if latest.exists() or latest.is_symlink(): latest.unlink()
+                                latest.symlink_to(out_path.name)
+                            except Exception:
+                                import shutil
+                                shutil.copy2(out_path, latest)
+                        
+                        # 簡易サマリをSTDOUT
+                        head = latest_uni.head(10).to_dict(orient="records")
+                        print(json.dumps({"asof": asof, "count_all": int(len(latest_uni)),
+                                          "count_top": int(len(latest_uni)),
+                                          "top10_preview": head, "fallback": True}, ensure_ascii=False, indent=2))
+                        
+                        total_time = time.time() - start_time
+                        logging.info(f"Done (fallback). wrote {out_path}")
+                        logging.info(f"[TIMING] TOTAL: {total_time:.2f}秒 ({total_time/60:.1f}分)")
+                        sys.exit(0)
+                    except Exception as e2:
+                        logging.error(f"[ERROR] 前回のuniverse読み込みも失敗: {e2}")
+                        logging.error("[ERROR] 運用を継続できません。手動対応が必要です。")
+                        sys.exit(2)
+                else:
+                    logging.error("[ERROR] 前回のuniverseファイルが見つかりません。運用を継続できません。")
+                    sys.exit(2)
 
+    # 計測: 流動性計算・ランキング
+    step_start = time.time()
     recs=[]
     for t in tickers:
         df = prices.get(t)
@@ -221,12 +342,19 @@ def main():
     uni = uni.head(k).reset_index(drop=True)
     uni["liquidity_rank"] = np.arange(1, len(uni)+1)
     uni["asof"] = asof
+    logging.info(f"[TIMING] compute_liquidity_and_rank: {time.time() - step_start:.2f}秒 (対象銘柄数: {len(recs)}, 選定銘柄数: {len(uni)})")
 
-    # 出力
+    # 計測: ファイル出力
+    step_start = time.time()
     out_dir = Path(cfg["output"]["dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{asof.replace('-','')}_universe.parquet"
-    uni.to_parquet(out_path, index=False)
+    
+    # 日付付きuniverseファイルはhistory/に保存（誤爆防止）
+    history_dir = out_dir / "history"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    out_path = history_dir / f"{asof.replace('-','')}_universe.parquet"
+    uni.to_parquet(out_path, index=False, compression="snappy")
+    logging.info(f"[TIMING] write_parquet: {time.time() - step_start:.2f}秒")
 
     # latest シンボリック（Windowsで権限不可ならtry/except）
     if cfg["output"].get("write_latest_symlink", True):
@@ -247,7 +375,10 @@ def main():
     print(json.dumps({"asof": asof, "count_all": int(len(uni)),
                       "count_top": int(k),
                       "top10_preview": head}, ensure_ascii=False, indent=2))
+    
+    total_time = time.time() - start_time
     logging.info(f"Done. wrote {out_path}")
+    logging.info(f"[TIMING] TOTAL: {total_time:.2f}秒 ({total_time/60:.1f}分)")
     sys.exit(0)
 
 if __name__=="__main__":

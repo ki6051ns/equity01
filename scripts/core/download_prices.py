@@ -21,7 +21,7 @@ except ImportError:  # tqdm が無ければダミー
         return x
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # scripts/core/download_prices.py -> scripts -> equity01
 
 
 def load_universe_tickers(universe_path: Path) -> List[str]:
@@ -159,6 +159,10 @@ def main() -> None:
     print(f"[download_prices] tickers      : {len(tickers)} names")
     print(f"[download_prices] period       : {args.start} → {args.end or date.today().isoformat()}")
 
+    # 【⑤ 祝日・価格未更新日の挙動】
+    # - 取得不能時は例外をキャッチして警告を出力し、次の銘柄に進む（処理は継続）
+    # - 営業日カレンダーによる事前判定は行わない（Yahoo Finance側のデータ有無に依存）
+    # - 営業日カレンダー実装は不要（予防線のみ）
     for ticker in tqdm(tickers, desc="Downloading"):
         out_path = outdir / f"prices_{ticker}.csv"
         if out_path.exists() and not args.force:

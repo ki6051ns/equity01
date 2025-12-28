@@ -18,18 +18,34 @@
 - **入力**: ユニバースファイル（.parquet）
 - **出力**: `data/raw/prices/prices_{TICKER}.csv`
 - **実運営**: ✅ 必要（価格データ取得）
+- **【⑤ 祝日・価格未更新日の挙動（予防線）】**:
+  - 取得不能時は例外をキャッチして警告を出力し、次の銘柄に進む（処理は継続）
+  - 営業日カレンダーによる事前判定は行わない（Yahoo Finance側のデータ有無に依存）
+  - 営業日カレンダー実装は不要（予防線のみ）
 
 ### 3. build_features.py
 - **目的**: 特徴量構築（モメンタム・ボラティリティ等の特徴量を計算）
 - **入力**: 価格データ（`data/raw/prices/`）
 - **出力**: `data/processed/daily_feature_scores.parquet`
 - **実運営**: ✅ 必要（特徴量生成）
+- **【① TOPIX依存の可視化】TOPIX（日次指数リターン）を参照**:
+  - データ欠損時は `mkt_ret_1d = 0.0` でフォールバック（警告を出力）
+  - 無言スルー禁止：データが見つからない場合は警告を出力
+- **【② run_scoring 二重実行の回避（設計確定）】:
+  - `build_features.py` 内で `compute_scores_all` を呼び出してスコアリングを実行
+  - `run_scoring.py` は別途実行しない（二重実行を回避）
+  - スコアリングは `build_features.py` 内で完結する
 
 ### 4. run_scoring.py
 - **目的**: スコアリング実行（CLIエントリポイント）
 - **入力**: `configs/scoring.yml`
 - **出力**: `data/intermediate/scoring/latest_scores.parquet`
-- **実運営**: ✅ 必要（スコアリング実行）
+- **実運営**: ⚠️ オプション（`build_features.py`内でスコアリングが実行されるため、通常は不要）
+- **【② run_scoring 二重実行の回避（設計確定）】:
+  - `build_features.py` 内で `compute_scores_all` を呼び出してスコアリングを実行するため、
+    `run_scoring.py` を別途実行すると二重実行となる
+  - coreパイプライン（`run_equity01_core.ps1`）では `run_scoring.py` を実行しない
+  - 手動でスコアリングのみ実行したい場合のみ使用
 
 ### 5. scoring_engine.py
 - **目的**: スコアリングエンジン（feature_score → size bucket別Z-score → ポートフォリオ候補生成）
@@ -41,6 +57,11 @@
 - **入力**: `data/processed/daily_feature_scores.parquet`
 - **出力**: `data/processed/daily_portfolio_guarded.parquet`（運用終点、Executionが読む正本）
 - **実運営**: ✅ 必要（運用終点生成）
+- **【③ 最重要】latest解釈の固定（契約レベル）**: 
+  - date列をdatetimeに正規化（timezoneなし）してから保存
+  - date列で昇順ソートしてから保存
+  - **実運用では `daily_portfolio_guarded.parquet` の `date` 列の `max(date)` の行のみを使用する**
+  - latest専用ファイル作成・完了フラグ・営業日判定は不要
 
 **実行順序**:
 ```bash
@@ -50,15 +71,18 @@ python scripts/core/universe_builder.py --config configs/universe.yml
 # 2. 価格データ取得
 python scripts/core/download_prices.py --universe data/intermediate/universe/latest_universe.parquet
 
-# 3. 特徴量構築
+# 3. 特徴量構築（内部でスコアリングも実行される）
 python scripts/core/build_features.py
 
-# 4. スコアリング実行（オプション、build_features.py内で実行される場合もある）
-python scripts/core/run_scoring.py --config configs/scoring.yml
-
-# 5. ポートフォリオ構築（運用終点生成）
+# 4. ポートフォリオ構築（運用終点生成）
 python scripts/core/build_portfolio.py
 ```
+
+**注意**: `run_scoring.py` は `build_features.py` 内でスコアリングが実行されるため、通常は実行不要です。
+
+**【④ 途中生成物の扱い（明示のみ）】**:
+- 途中失敗時に生成物が残る可能性があるが、
+  Executionは `daily_portfolio_guarded.parquet` の `max(date)` 行のみを使用するため問題ない
 
 ---
 
@@ -176,4 +200,23 @@ python scripts/stg_sanity_check.py
   - `scripts/core/build_portfolio.py` で生成
 
 weights型ファイル（`data/processed/weights/`配下）は研究用であり、実運営では使用しない。
+
+---
+
+## 運用上の注意事項
+
+### universe_builderのyfinance取得失敗時の挙動
+- **現在の設定**: A案（堅牢）を採用
+  - yfinance取得失敗時は、前回の`latest_universe.parquet`を使用して継続
+  - ログに`[ERROR]`を記録し、`[FALLBACK]`として前回データを使用
+  - 運用は継続されるが、ログで確認可能
+- **代替案**: B案（品質）
+  - yfinance取得失敗時は`ExitCode!=0`で停止（その日は運用しない）
+  - より厳格だが、データ品質を優先
+
+### Windowsタスクスケジューラの運用設定
+- **実行時間帯**: 営業日の朝（例：平日 8:00）
+- **タイムアウト**: 2時間（120分）
+- **失敗時の再実行**: 基本なし（自動リトライなし）
+- **ログ保管期間**: 30日（自動ローテーション）
 
