@@ -92,22 +92,48 @@ def download_one(
     ticker: str,
     start: str,
     end: Optional[str],
+    retry_max: int = 3,
+    retry_backoff: float = 2.0,
 ) -> pd.DataFrame:
     """
     yfinance から1銘柄分の日足を取得し、
     equity01標準カラムに整形して返す。
+    
+    Args:
+        ticker: ティッカーシンボル
+        start: 開始日 (YYYY-MM-DD)
+        end: 終了日 (YYYY-MM-DD, Noneなら今日)
+        retry_max: リトライ最大回数
+        retry_backoff: リトライ時のバックオフ秒数（指数バックオフ）
     """
-    end_ = end or date.today().isoformat()
-
-    df = yf.download(
-        ticker,
-        start=start,
-        end=end_,
-        interval="1d",
-        auto_adjust=False,
-        progress=False,
-        threads=False,
-    )
+    # yfinanceのendはexclusive（指定日を含まない）なので、1日後を指定
+    if end:
+        end_date = pd.to_datetime(end)
+        end_ = (end_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    else:
+        end_ = (date.today() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    last_err = None
+    for attempt in range(retry_max):
+        try:
+            df = yf.download(
+                ticker,
+                start=start,
+                end=end_,
+                interval="1d",
+                auto_adjust=False,
+                progress=False,
+                threads=False,  # レート制限対策
+            )
+            break  # 成功したらループを抜ける
+        except Exception as e:
+            last_err = e
+            if attempt < retry_max - 1:
+                sleep_sec = retry_backoff ** attempt
+                time.sleep(sleep_sec)
+            else:
+                # 最終試行でも失敗した場合は例外を再発生
+                raise last_err
 
     if df.empty:
         return df
