@@ -2,6 +2,7 @@
 
 from datetime import date
 import sys
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -18,6 +19,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.core.scoring_engine import ScoringEngineConfig, build_daily_portfolio
 
+# 最小候補銘柄数（これ未満ならportfolio生成をスキップ）
+MIN_CANDIDATES_PER_DAY = 10
+
 
 def main():
     feat_path = Path("data/processed/daily_feature_scores.parquet")
@@ -25,6 +29,32 @@ def main():
 
     # 日付をdatetimeに変換
     df_features["date"] = pd.to_datetime(df_features["date"])
+
+    # 最新日のfeature行数をチェック
+    latest_date = df_features["date"].max()
+    latest_features = df_features[df_features["date"] == latest_date]
+    n_features = len(latest_features)
+    
+    if n_features < MIN_CANDIDATES_PER_DAY:
+        logging.warning(
+            f"SKIP_PORTFOLIO_TOO_FEW_FEATURES "
+            f"date={latest_date.strftime('%Y-%m-%d')} n={n_features} "
+            f"(min={MIN_CANDIDATES_PER_DAY})"
+        )
+        print(f"[WARNING] ポートフォリオ生成をスキップ: {latest_date.strftime('%Y-%m-%d')} のfeature行数が不足 ({n_features} < {MIN_CANDIDATES_PER_DAY})")
+        
+        # 既存のportfolioファイルを読み込んで、最新日を確認
+        out_path = Path("data/processed/daily_portfolio_guarded.parquet")
+        if out_path.exists():
+            df_existing = pd.read_parquet(out_path)
+            df_existing["date"] = pd.to_datetime(df_existing["date"])
+            existing_latest = df_existing["date"].max()
+            print(f"[INFO] 既存のportfolio最新日: {existing_latest.strftime('%Y-%m-%d')} (更新なし)")
+        else:
+            print("[WARNING] 既存のportfolioファイルが見つかりません")
+        
+        # latest更新なしとして終了（exit code 0で正常終了）
+        return
 
     cfg = ScoringEngineConfig()
 
