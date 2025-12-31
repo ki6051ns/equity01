@@ -192,6 +192,7 @@ def main() -> None:
     failed_symbols = []
     empty_symbols = []
     symbols_missing_asof = []
+    processed_count = 0
     
     asof_date = pd.to_datetime(args.end or date.today().isoformat())
 
@@ -200,19 +201,47 @@ def main() -> None:
     # - 営業日カレンダーによる事前判定は行わない（Yahoo Finance側のデータ有無に依存）
     # - 営業日カレンダー実装は不要（予防線のみ）
     for ticker in tqdm(tickers, desc="Downloading"):
+        processed_count += 1
         out_path = outdir / f"prices_{ticker}.csv"
-        if out_path.exists() and not args.force:
-            # 既にあるならスキップ（ただしasof日付の確認は行う）
+        
+        # 既存ファイルの確認
+        file_exists = out_path.exists()
+        last_date = None
+        need_fetch = False
+        
+        if file_exists and not args.force:
+            # 既存ファイルがある場合、asof日付の確認
             try:
                 existing_df = pd.read_csv(out_path)
                 existing_df["date"] = pd.to_datetime(existing_df["date"])
+                last_date = existing_df["date"].max()
                 has_asof = (existing_df["date"] == asof_date).any()
+                
+                # asof日付が欠落している場合は強制fetch
+                need_fetch = (last_date is None) or (last_date < asof_date)
+                
                 if not has_asof:
                     symbols_missing_asof.append(ticker)
-            except Exception:
-                pass
+            except Exception as e:
+                # 既存ファイルの読み込みに失敗した場合はfetch
+                need_fetch = True
+                print(f"[download_prices] WARNING {ticker}: 既存ファイル読み込みエラー、再取得します: {e}")
+        else:
+            # ファイルが存在しない、またはforce指定の場合はfetch
+            need_fetch = True
+        
+        # デバッグログ（最初の3銘柄のみ）
+        if processed_count <= 3:
+            print(f"[download_prices] PROCESS ticker={ticker} file_exists={file_exists} last_date={last_date} end_date={asof_date.strftime('%Y-%m-%d')} need_fetch={need_fetch}")
+        
+        # need_fetch=Falseの場合はスキップ
+        if not need_fetch:
             continue
-
+        
+        # fetch実行
+        if processed_count <= 3:
+            print(f"[download_prices] FETCH_START ticker={ticker}")
+        
         try:
             df = download_one(ticker, start=args.start, end=args.end, retry_max=3, retry_backoff=2.0)
             fetched_symbols += 1
@@ -231,10 +260,14 @@ def main() -> None:
         # asof日付の確認
         df["date"] = pd.to_datetime(df["date"])
         has_asof = (df["date"] == asof_date).any()
+        max_date = df["date"].max()
+        
+        if processed_count <= 3:
+            print(f"[download_prices] FETCH_DONE ticker={ticker} rows={len(df)} max_date={max_date.strftime('%Y-%m-%d')}")
+        
         if not has_asof:
             symbols_missing_asof.append(ticker)
-            latest_date = df["date"].max()
-            print(f"[download_prices] WARNING {ticker}: {asof_date.strftime('%Y-%m-%d')} not found (latest: {latest_date.strftime('%Y-%m-%d')})")
+            print(f"[download_prices] WARNING {ticker}: {asof_date.strftime('%Y-%m-%d')} not found (latest: {max_date.strftime('%Y-%m-%d')})")
 
         try:
             df.to_csv(out_path, index=False)
@@ -250,6 +283,7 @@ def main() -> None:
     # 集計ログを出力
     print("\n[download_prices] ===== 集計 =====")
     print(f"[download_prices] requested_symbols = {requested_symbols}")
+    print(f"[download_prices] processed_count = {processed_count}")
     print(f"[download_prices] fetched_symbols = {fetched_symbols}")
     print(f"[download_prices] written_files = {written_files}")
     print(f"[download_prices] failed_symbols = {len(failed_symbols)}")
@@ -261,6 +295,15 @@ def main() -> None:
     print(f"[download_prices] symbols_missing_asof ({asof_date.strftime('%Y-%m-%d')}) = {len(symbols_missing_asof)}")
     if symbols_missing_asof:
         print(f"[download_prices]   → {symbols_missing_asof}")
+    
+    # 異常検知
+    if processed_count == 0:
+        raise RuntimeError("processed_count == 0: ループが一度も実行されていません")
+    
+    if requested_symbols > 0 and fetched_symbols == 0 and len(symbols_missing_asof) == requested_symbols:
+        print(f"\n[download_prices] ERROR: 全銘柄でasof日付が欠落しているのに、fetchが実行されていません")
+        print(f"[download_prices]   これは異常です。need_fetch判定のロジックを確認してください。")
+    
     print("[download_prices] done.")
 
 
