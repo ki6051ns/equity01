@@ -1,6 +1,14 @@
 {
   "aum": 100000000.0,
   "leverage_ratio": 1.0,
-  "margin_buffer": 0.1
+  "margin_buffer_ratio": 0.25,
+  "cash_buffer_jpy": 200000.0,
+  "max_gross_notional_ratio": 0.30,
+  "max_symbol_notional_ratio": 0.08,
+  "min_trade_notional_jpy": 20000.0,
+  "retry_max": 3,
+  "retry_backoff_sec": 2.0,
+  "timeout_sec": 10.0,
+  "dry_run": true
 }
 

@@ -1,13 +1,16 @@
 """
 run_dryrun.py
 
-execution dry-runの実行入口。
+execution dry-runの実行入口（本番互換）。
 
 core成果物（daily_portfolio_guarded.parquet）の最新日を読み、
 前日スナップショットと比較してorder_intentを生成・出力する。
+order_events.jsonlに注文イベントを記録する。
 """
 from pathlib import Path
 import sys
+from datetime import datetime
+import uuid
 
 import pandas as pd
 
@@ -18,20 +21,31 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from execution.read_latest import read_latest_portfolio
 from execution.state_store import StateStore
-from execution.build_order_intent import build_order_intent
+from execution.build_order_intent import build_order_intent, load_config
 from execution.write_order_intent import OrderIntentWriter
+from execution.order_store import OrderStore
+from execution.order_id import generate_order_key
 from tools.lib import data_loader
 
 
 def main():
-    """dry-run実行"""
+    """dry-run実行（本番互換）"""
+    # run_idを生成（timestamp + uuid）
+    run_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    
     print("=" * 80)
     print("execution dry-run: order_intent生成")
+    print(f"run_id: {run_id}")
     print("=" * 80)
+    
+    # 設定を読み込む
+    config = load_config()
+    print(f"dry_run: {config.dry_run}")
     
     # 0. latest_date進行ガード（run_guard）
     print("\n[0] latest_date進行チェック中...")
     store = StateStore()
+    order_store = OrderStore()
     df_latest = read_latest_portfolio()
     latest_date = df_latest["date"].iloc[0]
     latest_date_normalized = pd.to_datetime(latest_date).normalize()
@@ -99,22 +113,65 @@ def main():
         prev_weights=prev_weights,
         prices=prices_series,
         latest_date=latest_date_normalized,
+        config=config,
     )
     
     print(f"order_intent銘柄数: {len(df_intent)}")
     print(f"合計delta_weight: {df_intent['delta_weight'].sum():.4f}")
     
-    # 5. order_intentを出力
-    print("\n[5] order_intentを出力中...")
+    # 5. order_eventsにINTENTを追記（冪等性の核）
+    print("\n[5] order_eventsにINTENTを記録中...")
+    latest_date_str = latest_date_normalized.strftime("%Y-%m-%d")
+    
+    for _, row in df_intent.iterrows():
+        symbol = row["symbol"]
+        notional_delta = row["notional_delta"]
+        side = "BUY" if notional_delta > 0 else "SELL"
+        notional = abs(notional_delta)
+        
+        # order_keyを生成（run_idは含めない、冪等性のため）
+        order_key = generate_order_key(
+            latest_date=latest_date_normalized.date(),
+            symbol=symbol,
+            side=side,
+            rounded_notional=round(notional / 100_000) * 100_000,  # 10万円単位で丸める
+        )
+        
+        # 既にSUBMITTED以上の場合、スキップ（二重発注防止）
+        if order_store.is_order_submitted(order_key):
+            print(f"  スキップ: {symbol} {side} (既にSUBMITTED以上)")
+            continue
+        
+        # dry-runではINTENTが既にある場合もスキップ（安全側）
+        if config.dry_run and order_store.has_order_intent(order_key):
+            print(f"  スキップ: {symbol} {side} (既にINTENT記録済み)")
+            continue
+        
+        # INTENTイベントを記録
+        order_store.append_event(
+            run_id=run_id,
+            latest_date=latest_date_str,
+            order_key=order_key,
+            symbol=symbol,
+            side=side,
+            notional=notional,
+            price_type="MARKET",
+            status="INTENT",
+        )
+    
+    print(f"INTENTイベント記録完了: {len(df_intent)} 件")
+    
+    # 6. order_intentを出力
+    print("\n[6] order_intentを出力中...")
     writer = OrderIntentWriter()
     writer.write(df_intent, latest_date, format="both")
     
-    # 6. 現在の状態を保存（次回実行時の前日状態として）
-    print("\n[6] 現在の状態を保存中...")
+    # 7. 現在の状態を保存（次回実行時の前日状態として）
+    print("\n[7] 現在の状態を保存中...")
     store.save_state(df_latest, latest_date)
     
-    # 7. latest_date進行ガードを更新（run_guard）
-    print("\n[7] latest_date進行ガードを更新中...")
+    # 8. latest_date進行ガードを更新（run_guard）
+    print("\n[8] latest_date進行ガードを更新中...")
     store.save_last_executed_latest_date(latest_date_normalized)
     
     print("\n" + "=" * 80)

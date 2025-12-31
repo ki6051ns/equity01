@@ -16,7 +16,21 @@ class ExecutionConfig:
     """実行設定"""
     aum: float = 100_000_000.0  # 1億円
     leverage_ratio: float = 1.0  # レバレッジ（1.0 = ノンレバ）
-    margin_buffer: float = 0.1  # マージン余裕（10%）
+    margin_buffer_ratio: float = 0.25  # マージン余裕比率（25%）
+    cash_buffer_jpy: float = 200_000.0  # 現金バッファ（常に現金で残す）
+    max_gross_notional_ratio: float = 0.30  # AUMに対する当日売買代金の上限
+    max_symbol_notional_ratio: float = 0.08  # 1銘柄の当日増分上限
+    min_trade_notional_jpy: float = 20_000.0  # 最小取引金額
+    retry_max: int = 3  # リトライ最大回数
+    retry_backoff_sec: float = 2.0  # リトライバックオフ（秒）
+    timeout_sec: float = 10.0  # タイムアウト（秒）
+    dry_run: bool = True  # dry-runモード
+    
+    # 後方互換性のため
+    @property
+    def margin_buffer(self) -> float:
+        """後方互換性のため（margin_buffer_ratioに置き換え）"""
+        return self.margin_buffer_ratio
 
 
 def calculate_order_intent(
@@ -24,6 +38,8 @@ def calculate_order_intent(
     prev_weights: Optional[pd.Series],
     prices: pd.Series,
     config: ExecutionConfig,
+    available_cash: Optional[float] = None,
+    available_margin: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     ターゲットウェイトと前日ウェイトからorder_intentを計算する。
@@ -62,20 +78,64 @@ def calculate_order_intent(
     delta_w = target_w - prev_w
     
     # notional_deltaを計算（= aum * delta_weight * leverage）
-    notional_delta = config.aum * delta_w * config.leverage_ratio
-    
-    # order_intentを作成
-    df = pd.DataFrame({
+    # まずはDataFrameとして作成
+    df_base = pd.DataFrame({
         "symbol": all_symbols,
         "prev_weight": prev_w,
         "target_weight": target_w,
         "delta_weight": delta_w,
         "price": price,
-        "aum": config.aum,
-        "notional_delta": notional_delta,
-        "leverage_ratio": config.leverage_ratio,
-        "margin_buffer": config.margin_buffer,
     })
+    
+    notional_delta = config.aum * delta_w * config.leverage_ratio
+    
+    # 3-1) 共通：上限制約でクリップ
+    gross_notional = notional_delta.abs().sum()
+    gross_notional_cap = config.aum * config.max_gross_notional_ratio
+    
+    if gross_notional > gross_notional_cap:
+        scale = gross_notional_cap / gross_notional
+        notional_delta = notional_delta * scale
+    
+    # 3-2) 現物（買付余力）
+    # available_cashが指定されていない場合は推定
+    if available_cash is None:
+        available_cash = config.aum - config.cash_buffer_jpy
+    
+    buy_notional = notional_delta[notional_delta > 0].sum()
+    if buy_notional > available_cash:
+        # BUY側を縮小
+        buy_scale = available_cash / buy_notional
+        notional_delta = notional_delta.apply(lambda x: x * buy_scale if x > 0 else x)
+    
+    # 3-3) CFD（必要証拠金＋バッファ）
+    if config.leverage_ratio > 1.0:
+        gross_buy_notional = notional_delta[notional_delta > 0].abs().sum()
+        req_margin_simple = gross_buy_notional / config.leverage_ratio
+        req_margin_with_buffer = req_margin_simple * (1 + config.margin_buffer_ratio)
+        
+        # available_marginが指定されていない場合は推定
+        if available_margin is None:
+            available_margin = config.aum - config.cash_buffer_jpy
+        
+        if req_margin_with_buffer > available_margin:
+            # notionalを縮小
+            margin_scale = available_margin / req_margin_with_buffer
+            notional_delta = notional_delta * margin_scale
+    
+    # 銘柄別上限チェック
+    max_symbol_notional = config.aum * config.max_symbol_notional_ratio
+    notional_delta = notional_delta.apply(lambda x: max(-max_symbol_notional, min(max_symbol_notional, x)))
+    
+    # DataFrameを作成（notional_deltaは既に調整済み）
+    df = df_base.copy()
+    df["aum"] = config.aum
+    df["notional_delta"] = notional_delta
+    df["leverage_ratio"] = config.leverage_ratio
+    df["margin_buffer_ratio"] = config.margin_buffer_ratio
+    
+    # 最小取引金額以下を除外
+    df = df[df["notional_delta"].abs() >= config.min_trade_notional_jpy].copy()
     
     # notesを追加（丸めや欠損の理由）
     notes = []
@@ -119,7 +179,15 @@ def load_config(config_path: Path = Path("execution/config.json")) -> ExecutionC
             return ExecutionConfig(
                 aum=config_dict.get("aum", 100_000_000.0),
                 leverage_ratio=config_dict.get("leverage_ratio", 1.0),
-                margin_buffer=config_dict.get("margin_buffer", 0.1),
+                margin_buffer_ratio=config_dict.get("margin_buffer_ratio", 0.25),
+                cash_buffer_jpy=config_dict.get("cash_buffer_jpy", 200_000.0),
+                max_gross_notional_ratio=config_dict.get("max_gross_notional_ratio", 0.30),
+                max_symbol_notional_ratio=config_dict.get("max_symbol_notional_ratio", 0.08),
+                min_trade_notional_jpy=config_dict.get("min_trade_notional_jpy", 20_000.0),
+                retry_max=config_dict.get("retry_max", 3),
+                retry_backoff_sec=config_dict.get("retry_backoff_sec", 2.0),
+                timeout_sec=config_dict.get("timeout_sec", 10.0),
+                dry_run=config_dict.get("dry_run", True),
             )
     else:
         # デフォルト値
@@ -132,6 +200,8 @@ def build_order_intent(
     prices: pd.Series,
     latest_date: pd.Timestamp,
     config: Optional[ExecutionConfig] = None,
+    available_cash: Optional[float] = None,
+    available_margin: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     order_intentを構築する。
@@ -163,6 +233,8 @@ def build_order_intent(
         prev_weights=prev_weights,
         prices=prices,
         config=config,
+        available_cash=available_cash,
+        available_margin=available_margin,
     )
     
     # latest_dateを追加
@@ -178,7 +250,7 @@ def build_order_intent(
         "aum",
         "leverage_ratio",
         "notional_delta",
-        "margin_buffer",
+        "margin_buffer_ratio",
         "notes",
     ]
     # 存在する列だけ選択
