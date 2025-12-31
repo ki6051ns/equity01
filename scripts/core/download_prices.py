@@ -159,6 +159,16 @@ def main() -> None:
     print(f"[download_prices] tickers      : {len(tickers)} names")
     print(f"[download_prices] period       : {args.start} → {args.end or date.today().isoformat()}")
 
+    # 集計用の変数
+    requested_symbols = len(tickers)
+    fetched_symbols = 0
+    written_files = 0
+    failed_symbols = []
+    empty_symbols = []
+    symbols_missing_asof = []
+    
+    asof_date = pd.to_datetime(args.end or date.today().isoformat())
+
     # 【⑤ 祝日・価格未更新日の挙動】
     # - 取得不能時は例外をキャッチして警告を出力し、次の銘柄に進む（処理は継続）
     # - 営業日カレンダーによる事前判定は行わない（Yahoo Finance側のデータ有無に依存）
@@ -166,24 +176,65 @@ def main() -> None:
     for ticker in tqdm(tickers, desc="Downloading"):
         out_path = outdir / f"prices_{ticker}.csv"
         if out_path.exists() and not args.force:
-            # 既にあるならスキップ
+            # 既にあるならスキップ（ただしasof日付の確認は行う）
+            try:
+                existing_df = pd.read_csv(out_path)
+                existing_df["date"] = pd.to_datetime(existing_df["date"])
+                has_asof = (existing_df["date"] == asof_date).any()
+                if not has_asof:
+                    symbols_missing_asof.append(ticker)
+            except Exception:
+                pass
             continue
 
         try:
-            df = download_one(ticker, start=args.start, end=args.end)
+            df = download_one(ticker, start=args.start, end=args.end, retry_max=3, retry_backoff=2.0)
+            fetched_symbols += 1
         except Exception as e:
             print(f"[download_prices] ERROR {ticker}: {e}")
+            failed_symbols.append(ticker)
             time.sleep(args.sleep)
             continue
 
         if df.empty:
             print(f"[download_prices] NO DATA for {ticker}")
+            empty_symbols.append(ticker)
             time.sleep(args.sleep)
             continue
 
-        df.to_csv(out_path, index=False)
+        # asof日付の確認
+        df["date"] = pd.to_datetime(df["date"])
+        has_asof = (df["date"] == asof_date).any()
+        if not has_asof:
+            symbols_missing_asof.append(ticker)
+            latest_date = df["date"].max()
+            print(f"[download_prices] WARNING {ticker}: {asof_date.strftime('%Y-%m-%d')} not found (latest: {latest_date.strftime('%Y-%m-%d')})")
+
+        try:
+            df.to_csv(out_path, index=False)
+            written_files += 1
+        except Exception as e:
+            print(f"[download_prices] WRITE ERROR {ticker}: {e}")
+            failed_symbols.append(ticker)
+            time.sleep(args.sleep)
+            continue
+
         time.sleep(args.sleep)
 
+    # 集計ログを出力
+    print("\n[download_prices] ===== 集計 =====")
+    print(f"[download_prices] requested_symbols = {requested_symbols}")
+    print(f"[download_prices] fetched_symbols = {fetched_symbols}")
+    print(f"[download_prices] written_files = {written_files}")
+    print(f"[download_prices] failed_symbols = {len(failed_symbols)}")
+    if failed_symbols:
+        print(f"[download_prices]   → {failed_symbols}")
+    print(f"[download_prices] empty_symbols = {len(empty_symbols)}")
+    if empty_symbols:
+        print(f"[download_prices]   → {empty_symbols}")
+    print(f"[download_prices] symbols_missing_asof ({asof_date.strftime('%Y-%m-%d')}) = {len(symbols_missing_asof)}")
+    if symbols_missing_asof:
+        print(f"[download_prices]   → {symbols_missing_asof}")
     print("[download_prices] done.")
 
 
