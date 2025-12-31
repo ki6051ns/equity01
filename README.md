@@ -344,10 +344,11 @@ equity01/
 │   │   ├── visualize_*.py
 │   │   └── ...
 │   │
-│   └── tools/             # 補助・ユーティリティ
-│       ├── data_loader.py
-│       ├── build_index_tpx_daily.py
-│       └── ...
+│   └── tools/             # 汎用ユーティリティ専用（lib/bin分離）
+│       ├── lib/           # import可能な純ライブラリ（core/analysis/executionから使用可）
+│       │   ├── data_loader.py
+│       │   └── feature_builder.py
+│       └── bin/           # 単独実行専用（import禁止）
 │
 ├── data/
 │   ├── raw/               # 生データ（Git管理）
@@ -367,10 +368,18 @@ equity01/
 
 ## 依存関係ルール
 
-- ✅ **`core → tools`**: OK（補助機能の利用）
+- ✅ **`core → tools.lib`**: OK（補助機能の利用）
 - ❌ **`core → analysis`**: 禁止（評価レポート類はanalysisのエントリに寄せる）
 - ✅ **`analysis → core`**: OK（分析ツールがcore機能を利用）
-- ✅ **`analysis → tools`**: OK
+- ✅ **`analysis → tools.lib`**: OK
+- ✅ **`execution → tools.lib`**: OK
+- ❌ **`* → tools.bin`**: 禁止（binは単独実行専用）
+
+**tools/lib/bin分離ルール:**
+- `scripts/tools/lib/`: import可能な純ライブラリ（core/analysis/executionから使用可）
+- `scripts/tools/bin/`: 単独実行専用（import禁止）
+- 追加ファイルは必ずどちらかに分類する
+- bin import禁止チェック: `python scripts/ops/check_no_bin_import.py`
 
 ## 実行エントリポイント
 
@@ -379,6 +388,16 @@ equity01/
 - **運用終点生成**: `scripts/core/build_portfolio.py` - ポートフォリオ構築
   - 出力: `data/processed/daily_portfolio_guarded.parquet`（Executionが読む正本）
   - Executionはこのファイルの最新日を読む
+
+### Execution（dry-run）
+
+- **注文実行（dry-run）**: `python scripts/ops/run_execution_dryrun.py`
+  - core成果物からorder_intentを生成
+  - 冪等性確保: `order_key = latest_date + symbol + side + rounded_notional`
+  - 二重発注防止: SUBMITTED以上またはINTENTが既にある場合はSKIP
+  - **UNKNOWNクールダウン**: 通信エラー等でUNKNOWN状態になった注文は一定時間（デフォルト30分）再発注しない
+    - `unknown_action`: "SKIP"（既定、一部のみ保留）or "HALT"（全体停止）
+    - `unknown_scope`: "order_key"（既定、注文単位）or "latest_date"（日付単位）
 
 ### stg整合性チェック
 

@@ -25,6 +25,9 @@ class ExecutionConfig:
     retry_backoff_sec: float = 2.0  # リトライバックオフ（秒）
     timeout_sec: float = 10.0  # タイムアウト（秒）
     dry_run: bool = True  # dry-runモード
+    unknown_cooldown_sec: float = 1800.0  # UNKNOWNクールダウン（秒、30分）
+    unknown_action: str = "SKIP"  # UNKNOWN時の動作（"SKIP" or "HALT"）
+    unknown_scope: str = "order_key"  # UNKNOWNスコープ（"order_key" or "latest_date"）
     
     # 後方互換性のため
     @property
@@ -188,6 +191,9 @@ def load_config(config_path: Path = Path("execution/config.json")) -> ExecutionC
                 retry_backoff_sec=config_dict.get("retry_backoff_sec", 2.0),
                 timeout_sec=config_dict.get("timeout_sec", 10.0),
                 dry_run=config_dict.get("dry_run", True),
+                unknown_cooldown_sec=config_dict.get("unknown_cooldown_sec", 1800.0),
+                unknown_action=config_dict.get("unknown_action", "SKIP"),
+                unknown_scope=config_dict.get("unknown_scope", "order_key"),
             )
     else:
         # デフォルト値

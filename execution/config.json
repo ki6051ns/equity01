@@ -9,6 +9,9 @@
   "retry_max": 3,
   "retry_backoff_sec": 2.0,
   "timeout_sec": 10.0,
-  "dry_run": true
+  "dry_run": true,
+  "unknown_cooldown_sec": 1800,
+  "unknown_action": "SKIP",
+  "unknown_scope": "order_key"
 }
 

@@ -140,11 +140,59 @@ def main():
         # 既にSUBMITTED以上の場合、スキップ（二重発注防止）
         if order_store.is_order_submitted(order_key):
             print(f"  スキップ: {symbol} {side} (既にSUBMITTED以上)")
+            # SKIPPEDイベントを記録
+            order_store.append_event(
+                run_id=run_id,
+                latest_date=latest_date_str,
+                order_key=order_key,
+                symbol=symbol,
+                side=side,
+                notional=notional,
+                price_type="MARKET",
+                status="SKIPPED",
+                error_code="ALREADY_SUBMITTED",
+                error_message="既にSUBMITTED以上",
+            )
             continue
+        
+        # UNKNOWNクールダウンチェック
+        if order_store.has_recent_unknown(order_key, config.unknown_cooldown_sec):
+            if config.unknown_action == "HALT":
+                print(f"ERROR: {symbol} {side} がUNKNOWNクールダウン中です。実行を中断します。")
+                sys.exit(2)
+            else:  # SKIP
+                print(f"  スキップ: {symbol} {side} (UNKNOWNクールダウン中)")
+                # SKIPPEDイベントを記録
+                order_store.append_event(
+                    run_id=run_id,
+                    latest_date=latest_date_str,
+                    order_key=order_key,
+                    symbol=symbol,
+                    side=side,
+                    notional=notional,
+                    price_type="MARKET",
+                    status="SKIPPED",
+                    error_code="UNKNOWN_COOLDOWN",
+                    error_message=f"UNKNOWNクールダウン中（{config.unknown_cooldown_sec}秒）",
+                )
+                continue
         
         # dry-runではINTENTが既にある場合もスキップ（安全側）
         if config.dry_run and order_store.has_order_intent(order_key):
             print(f"  スキップ: {symbol} {side} (既にINTENT記録済み)")
+            # SKIPPEDイベントを記録
+            order_store.append_event(
+                run_id=run_id,
+                latest_date=latest_date_str,
+                order_key=order_key,
+                symbol=symbol,
+                side=side,
+                notional=notional,
+                price_type="MARKET",
+                status="SKIPPED",
+                error_code="DUPLICATE_INTENT",
+                error_message="既にINTENT記録済み",
+            )
             continue
         
         # INTENTイベントを記録

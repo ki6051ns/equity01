@@ -146,6 +146,57 @@ class OrderStore:
         status = self.get_order_status(order_key)
         return status == "INTENT"
     
+    def has_recent_unknown(self, order_key: str, cooldown_sec: float) -> bool:
+        """
+        指定されたorder_keyに最近のUNKNOWN状態があるかどうかを確認する。
+        （クールダウン中の再発注防止用）
+        
+        Parameters
+        ----------
+        order_key : str
+            注文キー
+        cooldown_sec : float
+            クールダウン期間（秒）
+        
+        Returns
+        -------
+        bool
+            クールダウン期間内にUNKNOWNがある場合True
+        """
+        if not self.events_file.exists():
+            return False
+        
+        from datetime import datetime, timedelta
+        
+        now = datetime.now()
+        cooldown_threshold = now - timedelta(seconds=cooldown_sec)
+        
+        try:
+            with open(self.events_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    event = json.loads(line)
+                    if event.get("order_key") == order_key and event.get("status") == "UNKNOWN":
+                        # tsをパース
+                        ts_str = event.get("ts")
+                        if ts_str:
+                            try:
+                                event_ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                # タイムゾーンを考慮（簡易版）
+                                if event_ts.tzinfo is None:
+                                    event_ts = event_ts.replace(tzinfo=None)
+                                    if now.tzinfo is None:
+                                        # 両方タイムゾーンなしなら比較可能
+                                        if event_ts > cooldown_threshold:
+                                            return True
+                            except Exception:
+                                pass
+        except Exception:
+            pass
+        
+        return False
+    
     def get_events_by_run_id(self, run_id: str) -> List[Dict]:
         """
         指定されたrun_idのイベントを取得する。
