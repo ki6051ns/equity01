@@ -28,6 +28,12 @@ class ExecutionConfig:
     unknown_cooldown_sec: float = 1800.0  # UNKNOWNクールダウン（秒、30分）
     unknown_action: str = "SKIP"  # UNKNOWN時の動作（"SKIP" or "HALT"）
     unknown_scope: str = "order_key"  # UNKNOWNスコープ（"order_key" or "latest_date"）
+    # βヘッジ設定
+    hedge_ratio_cfd: float = 1.0  # CFDヘッジ比率
+    hedge_ratio_cash: float = 1.0  # 現物ヘッジ比率
+    hedge_price_stale_action: str = "SKIP"  # ヘッジ価格が古い場合の動作（"SKIP" | "HALT" | "USE_LAST"）
+    cash_inverse_etf_symbol: str = "XXXX.T"  # 現物インバースETFシンボル
+    cfd_hedge_instrument: str = "TOPIX_CFD_SHORT"  # CFDヘッジ商品
     
     # 後方互換性のため
     @property
