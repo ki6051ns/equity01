@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.core.scoring_engine import ScoringEngineConfig, build_daily_portfolio
+from scripts.core.beta_calculator import calculate_portfolio_beta
 
 # 最小候補銘柄数（これ未満ならportfolio生成をスキップ）
 MIN_CANDIDATES_PER_DAY = 10
@@ -75,11 +76,32 @@ def main():
     df_port["date"] = pd.to_datetime(df_port["date"]).dt.normalize()
     df_port = df_port.sort_values("date").reset_index(drop=True)
 
+    # β計算（latest行のみ）
+    latest_date = df_port["date"].max()
+    latest_portfolio = df_port[df_port["date"] == latest_date].copy()
+    
+    print("β計算中...")
+    beta_equity_cash, beta_equity_cfd, beta_status, beta_ref_date = calculate_portfolio_beta(
+        latest_portfolio,
+        benchmark_symbol="1306.T",
+        lookback_days=60,
+        min_periods=20,
+    )
+    
+    print(f"β計算完了: equity_cash={beta_equity_cash:.3f}, equity_cfd={beta_equity_cfd:.3f}, status={beta_status}")
+    
+    # latest行にβ系4列を追加（全行に同じ値を設定）
+    df_port["beta_equity_cash"] = beta_equity_cash
+    df_port["beta_equity_cfd"] = beta_equity_cfd
+    df_port["beta_status"] = beta_status
+    df_port["beta_ref_date"] = beta_ref_date
+
     out_path = Path("data/processed/daily_portfolio_guarded.parquet")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df_port.to_parquet(out_path, index=False)
 
     print("daily portfolio saved to:", out_path)
+    print(f"[INFO] β情報: status={beta_status}, ref_date={beta_ref_date.strftime('%Y-%m-%d') if beta_ref_date else 'N/A'}")
     print(df_port.tail())
 
 
