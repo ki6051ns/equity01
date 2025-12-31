@@ -16,13 +16,13 @@ PROJECT_ROOT = PathLib(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from tools.feature_builder import FeatureBuilderConfig, build_feature_matrix
+from tools.lib.feature_builder import FeatureBuilderConfig, build_feature_matrix
 from scripts.core.scoring_engine import compute_scores_all, _zscore
 # 【② run_scoring 二重実行の可視化】
 # build_features.py 内で compute_scores_all を呼び出しているため、
 # run_scoring.py を別途実行する場合は二重実行となる可能性がある
 # 実行フローは変更しない（現状のまま）
-from tools import data_loader
+from tools.lib import data_loader
 
 
 def main():
@@ -177,11 +177,32 @@ def main():
     # ② 既存コード互換のため、当面は z_lin を feature_score として使う
     df_featured["feature_score"] = df_featured["score_z_lin"]
 
+    # NaT行の除去（latest契約やjoinで事故るため必須）
+    nat_n_before = df_featured["date"].isna().sum()
+    if nat_n_before > 0:
+        import logging
+        logging.warning(
+            f"build_features: {nat_n_before} rows with NaT date detected, dropping them"
+        )
+        print(f"[WARNING] {nat_n_before} rows with NaT date detected, dropping them")
+    
+    df_featured = df_featured[df_featured["date"].notna()].copy()
+    
+    # アサーション（date列がすべて有効であることを確認）
+    nat_n_after = df_featured["date"].isna().sum()
+    if nat_n_after > 0:
+        raise RuntimeError(f"build_features: {nat_n_after} NaT rows remain after drop. This should not happen.")
+    
+    # date列がdatetime64[ns]であることを確認（timezone禁止）
+    if df_featured["date"].dtype != "datetime64[ns]":
+        df_featured["date"] = pd.to_datetime(df_featured["date"]).dt.tz_localize(None)
+
     out_path = Path("data/processed/daily_feature_scores.parquet")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df_featured.to_parquet(out_path, index=False)
 
     print("feature matrix saved to:", out_path)
+    print(f"[INFO] Saved {len(df_featured)} rows (NaT rows dropped: {nat_n_before})")
     print(df_featured.tail())
 
 
