@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from execution.read_latest import read_latest_portfolio
 from execution.state_store import StateStore
 from execution.build_order_intent import build_order_intent, load_config
+from execution.build_hedge_intent import build_all_hedge_intents
 from execution.write_order_intent import OrderIntentWriter
 from execution.order_store import OrderStore
 from execution.order_id import generate_order_key
@@ -119,6 +120,32 @@ def main():
     print(f"order_intent銘柄数: {len(df_intent)}")
     print(f"合計delta_weight: {df_intent['delta_weight'].sum():.4f}")
     
+    # 4-2. ヘッジintentを生成
+    print("\n[4-2] ヘッジintentを計算中...")
+    cfd_hedge_intent, cash_hedge_intent = build_all_hedge_intents(
+        latest_date=latest_date_normalized,
+        config=config,
+    )
+    
+    # ヘッジintentを統合
+    hedge_intents = []
+    if cfd_hedge_intent is not None and len(cfd_hedge_intent) > 0:
+        hedge_intents.append(cfd_hedge_intent)
+        print(f"CFDヘッジintent: {len(cfd_hedge_intent)}件")
+    else:
+        print("CFDヘッジintent: SKIP（βステータスまたは設定により）")
+    
+    if cash_hedge_intent is not None and len(cash_hedge_intent) > 0:
+        hedge_intents.append(cash_hedge_intent)
+        print(f"現物ヘッジintent: {len(cash_hedge_intent)}件")
+    else:
+        print("現物ヘッジintent: SKIP（βステータスまたは設定により）")
+    
+    if hedge_intents:
+        df_hedge = pd.concat(hedge_intents, ignore_index=True)
+        df_intent = pd.concat([df_intent, df_hedge], ignore_index=True)
+        print(f"統合後のorder_intent銘柄数: {len(df_intent)}")
+    
     # 5. order_eventsにINTENTを追記（冪等性の核）
     print("\n[5] order_eventsにINTENTを記録中...")
     latest_date_str = latest_date_normalized.strftime("%Y-%m-%d")
@@ -129,12 +156,16 @@ def main():
         side = "BUY" if notional_delta > 0 else "SELL"
         notional = abs(notional_delta)
         
+        # hedge_typeを取得
+        hedge_type = row.get("hedge_type", "NORMAL")
+        
         # order_keyを生成（run_idは含めない、冪等性のため）
         order_key = generate_order_key(
             latest_date=latest_date_normalized.date(),
             symbol=symbol,
             side=side,
             rounded_notional=round(notional / 100_000) * 100_000,  # 10万円単位で丸める
+            hedge_type=hedge_type,
         )
         
         # 既にSUBMITTED以上の場合、スキップ（二重発注防止）

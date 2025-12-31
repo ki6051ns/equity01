@@ -14,6 +14,7 @@ def generate_order_key(
     symbol: str,
     side: str,  # "BUY" or "SELL"
     rounded_notional: Optional[float] = None,
+    hedge_type: str = "NORMAL",  # "NORMAL" | "CFD_HEDGE" | "CASH_HEDGE"
 ) -> str:
     """
     deterministic な order_key を生成する。
@@ -28,6 +29,8 @@ def generate_order_key(
         売買区分（"BUY" or "SELL"）
     rounded_notional : float or None
         丸めた取引金額（オプション、notionalが変わり得る場合に使用）
+    hedge_type : str
+        ヘッジタイプ（"NORMAL" | "CFD_HEDGE" | "CASH_HEDGE"）
     
     Returns
     -------
@@ -38,14 +41,15 @@ def generate_order_key(
     date_str = latest_date.strftime("%Y-%m-%d") if isinstance(latest_date, date) else str(latest_date)
     symbol_upper = symbol.upper().strip()
     side_upper = side.upper().strip()
+    hedge_type_upper = hedge_type.upper().strip()
     
     # 結合してハッシュ化（run_idは含めない）
     if rounded_notional is not None:
         # notionalを丸める（10万円単位）
         rounded = round(rounded_notional / 100_000) * 100_000
-        key_string = f"{date_str}|{symbol_upper}|{side_upper}|{rounded}"
+        key_string = f"{date_str}|{symbol_upper}|{side_upper}|{rounded}|{hedge_type_upper}"
     else:
-        key_string = f"{date_str}|{symbol_upper}|{side_upper}"
+        key_string = f"{date_str}|{symbol_upper}|{side_upper}|{hedge_type_upper}"
     
     hash_obj = hashlib.sha256(key_string.encode("utf-8"))
     order_key = hash_obj.hexdigest()[:16]  # 先頭16文字

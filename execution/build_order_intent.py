@@ -194,6 +194,12 @@ def load_config(config_path: Path = Path("execution/config.json")) -> ExecutionC
                 unknown_cooldown_sec=config_dict.get("unknown_cooldown_sec", 1800.0),
                 unknown_action=config_dict.get("unknown_action", "SKIP"),
                 unknown_scope=config_dict.get("unknown_scope", "order_key"),
+                # βヘッジ設定
+                hedge_ratio_cfd=config_dict.get("hedge", {}).get("hedge_ratio_cfd", 1.0),
+                hedge_ratio_cash=config_dict.get("hedge", {}).get("hedge_ratio_cash", 1.0),
+                hedge_price_stale_action=config_dict.get("hedge", {}).get("hedge_price_stale_action", "SKIP"),
+                cash_inverse_etf_symbol=config_dict.get("hedge", {}).get("cash_inverse_etf_symbol", "XXXX.T"),
+                cfd_hedge_instrument=config_dict.get("hedge", {}).get("cfd_hedge_instrument", "TOPIX_CFD_SHORT"),
             )
     else:
         # デフォルト値
@@ -246,6 +252,9 @@ def build_order_intent(
     # latest_dateを追加
     df["latest_date"] = latest_date.strftime("%Y-%m-%d")
     
+    # hedge_type列を追加（デフォルトはNORMAL）
+    df["hedge_type"] = "NORMAL"
+    
     # 列の順序を整理
     cols = [
         "latest_date",
@@ -257,6 +266,7 @@ def build_order_intent(
         "leverage_ratio",
         "notional_delta",
         "margin_buffer_ratio",
+        "hedge_type",
         "notes",
     ]
     # 存在する列だけ選択

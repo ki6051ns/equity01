@@ -12,6 +12,13 @@
   "dry_run": true,
   "unknown_cooldown_sec": 1800,
   "unknown_action": "SKIP",
-  "unknown_scope": "order_key"
+  "unknown_scope": "order_key",
+  "hedge": {
+    "hedge_ratio_cfd": 1.0,
+    "hedge_ratio_cash": 1.0,
+    "hedge_price_stale_action": "SKIP",
+    "cash_inverse_etf_symbol": "XXXX.T",
+    "cfd_hedge_instrument": "TOPIX_CFD_SHORT"
+  }
 }
 
