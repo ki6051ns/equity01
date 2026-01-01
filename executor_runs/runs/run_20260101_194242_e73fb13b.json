@@ -1,0 +1,292 @@
+{
+  "run_id": "20260101_194242_e73fb13b",
+  "created_at": "2026-01-01T19:42:42.691593",
+  "latest_date": "2025-12-30",
+  "mode": "DRYRUN_PRE_SUBMIT",
+  "inputs_hash": "2b7ab91cee37a255",
+  "intent_hash": "24f10dd8bd1bab9f",
+  "snapshots": {
+    "precheck_results": [
+      {
+        "passed": false,
+        "reason": "non_trading_day",
+        "details": {
+          "target_date": "2025-12-30",
+          "is_trading_day": false,
+          "calendar_range": {
+            "min": "2005-03-23T00:00:00",
+            "max": "2025-12-29T00:00:00"
+          }
+        }
+      }
+    ]
+  },
+  "order_intents": [
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "4063.T",
+      "side": "sell",
+      "qty": 46,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 227875.84210579057,
+      "order_key": "9fb63460cc5f120f",
+      "prev_weight": 0.052044670667680405,
+      "target_weight": 0.04447074340538129,
+      "delta_weight": -0.007573927262299114,
+      "notes": ""
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "6098.T",
+      "side": "sell",
+      "qty": 456,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 4034258.620301501,
+      "order_key": "1c16c96cc40c18b1",
+      "prev_weight": 0.13408697062886382,
+      "target_weight": 0.0,
+      "delta_weight": -0.13408697062886382,
+      "notes": "exit"
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "6501.T",
+      "side": "sell",
+      "qty": 192,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 941968.7710253806,
+      "order_key": "a4b7a036715f7a18",
+      "prev_weight": 0.03408238551169284,
+      "target_weight": 0.002774095483338714,
+      "delta_weight": -0.03130829002835413,
+      "notes": ""
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "6758.T",
+      "side": "sell",
+      "qty": 800,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 3222336.7033569408,
+      "order_key": "5d27e1b165ab2131",
+      "prev_weight": 0.10710105810396481,
+      "target_weight": 0.0,
+      "delta_weight": -0.10710105810396481,
+      "notes": "exit"
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "6861.T",
+      "side": "sell",
+      "qty": 32,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 1815485.1174641068,
+      "order_key": "cc23af7042f30235",
+      "prev_weight": 0.06034142144420976,
+      "target_weight": 0.0,
+      "delta_weight": -0.06034142144420976,
+      "notes": "exit"
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "8035.T",
+      "side": "buy",
+      "qty": 59,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 2052550.9934774758,
+      "order_key": "81fe8345a721e049",
+      "prev_weight": 0.20147919834981728,
+      "target_weight": 0.2696999969351323,
+      "delta_weight": 0.06822079858531502,
+      "notes": ""
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "8058.T",
+      "side": "buy",
+      "qty": 128,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 460044.79534630757,
+      "order_key": "2a070c005c441c03",
+      "prev_weight": 0.0,
+      "target_weight": 0.015290544996580288,
+      "delta_weight": 0.015290544996580288,
+      "notes": "enter"
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "8316.T",
+      "side": "sell",
+      "qty": 421,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 2125410.33423855,
+      "order_key": "8ff2cb41357ac75c",
+      "prev_weight": 0.07064243021683854,
+      "target_weight": 0.0,
+      "delta_weight": -0.07064243021683854,
+      "notes": "exit"
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "8411.T",
+      "side": "sell",
+      "qty": 461,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 2632664.6115077324,
+      "order_key": "0ed1b78335da09a3",
+      "prev_weight": 0.18780643617816678,
+      "target_weight": 0.10030435570606643,
+      "delta_weight": -0.08750208047210035,
+      "notes": ""
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "9432.T",
+      "side": "buy",
+      "qty": 35621,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 5617574.784525089,
+      "order_key": "6d031f91be4cd0ad",
+      "prev_weight": 0.0868602705925794,
+      "target_weight": 0.2735720449313717,
+      "delta_weight": 0.18671177433879232,
+      "notes": ""
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "9501.T",
+      "side": "buy",
+      "qty": 2713,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 1783858.1429629382,
+      "order_key": "a8113c2cecd92471",
+      "prev_weight": 0.0,
+      "target_weight": 0.05929023320861244,
+      "delta_weight": 0.05929023320861244,
+      "notes": "enter"
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "9983.T",
+      "side": "buy",
+      "qty": 88,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 5013111.942927115,
+      "order_key": "65d4d30c74f31af3",
+      "prev_weight": 0.004343453539508949,
+      "target_weight": 0.1709646489353158,
+      "delta_weight": 0.16662119539580683,
+      "notes": ""
+    },
+    {
+      "date": "2025-12-30",
+      "account": "cash",
+      "symbol": "9984.T",
+      "side": "buy",
+      "qty": 16,
+      "price_ref": "close",
+      "reason": "rebalance",
+      "constraints": {
+        "min_cash": 200000.0,
+        "max_leverage": 1.0
+      },
+      "notional": 72859.34076107183,
+      "order_key": "56cadb72cce6965f",
+      "prev_weight": 0.061211704766677644,
+      "target_weight": 0.06363333639820108,
+      "delta_weight": 0.002421631631523438,
+      "notes": ""
+    }
+  ],
+  "hedge_intents": [],
+  "results": {
+    "precheck_passed": false,
+    "stop_reason": "PRECHECK_FAILED",
+    "errors": [
+      {
+        "step": "precheck",
+        "reason": "non_trading_day",
+        "details": {
+          "target_date": "2025-12-30",
+          "is_trading_day": false,
+          "calendar_range": {
+            "min": "2005-03-23T00:00:00",
+            "max": "2025-12-29T00:00:00"
+          }
+        }
+      }
+    ]
+  }
+}
