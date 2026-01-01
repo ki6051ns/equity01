@@ -28,8 +28,27 @@ STOPロジック（eval_stop_regimes.py準拠）:
 """
 
 import sys
+import io
+import os
 from pathlib import Path
 from typing import Dict
+
+# Windows環境での文字化け対策
+if sys.platform == 'win32':
+    # 環境変数を設定
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    # 標準出力のエンコーディングをUTF-8に設定
+    try:
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        else:
+            # Python 3.7以前の互換性
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        # 既に設定されている場合はスキップ
+        pass
 
 # プロジェクトルートをパスに追加
 ROOT_DIR = Path(__file__).resolve().parents[2]  # scripts/analysis/build_cross4_target_weights_with_stop.py から2階層上

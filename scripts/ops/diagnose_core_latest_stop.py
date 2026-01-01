@@ -58,9 +58,21 @@ def check_feature_scores():
         for col in ["date", "symbol", "close", "adj_close", "feature_score", "adv_20d"]:
             if col in latest_df.columns:
                 na_count = latest_df[col].isna().sum()
-                nat_count = (pd.isna(latest_df[col]) & (latest_df[col] != latest_df[col])).sum() if col == "date" else 0
-                if na_count > 0 or nat_count > 0:
-                    print(f"  {col}: NaN={na_count}, NaT={nat_count}")
+                # NaT検出（date列の場合）
+                if col == "date":
+                    nat_count = pd.isna(latest_df[col]).sum()
+                    if nat_count > 0:
+                        print(f"  {col}: NaN={na_count}, NaT={nat_count}")
+                    elif na_count > 0:
+                        print(f"  {col}: NaN={na_count}")
+                elif na_count > 0:
+                    print(f"  {col}: NaN={na_count}")
+        
+        # NaT行の詳細
+        nat_rows = latest_df[pd.isna(latest_df["date"])]
+        if len(nat_rows) > 0:
+            print(f"\n  [WARNING] NaT行が{len(nat_rows)}行あります")
+            print(f"  NaT行のsymbol: {nat_rows['symbol'].tolist() if 'symbol' in nat_rows.columns else 'N/A'}")
         
         # 必須列の存在確認
         required_cols = ["date", "symbol", "close", "adj_close", "feature_score", "adv_20d"]
@@ -82,8 +94,20 @@ def check_feature_scores():
             print("\n  列別の欠損状況:")
             for col in target_df.columns:
                 na_count = target_df[col].isna().sum()
-                if na_count > 0:
-                    print(f"    {col}: {na_count}/{len(target_df)} がNaN")
+                if col == "date":
+                    nat_count = pd.isna(target_df[col]).sum()
+                    if nat_count > 0:
+                        print(f"    {col}: NaN={na_count}, NaT={nat_count}/{len(target_df)}")
+                    elif na_count > 0:
+                        print(f"    {col}: NaN={na_count}/{len(target_df)}")
+                elif na_count > 0:
+                    print(f"    {col}: NaN={na_count}/{len(target_df)}")
+            
+            # NaT行の詳細
+            nat_rows = target_df[pd.isna(target_df["date"])]
+            if len(nat_rows) > 0:
+                print(f"\n  [WARNING] NaT行が{len(nat_rows)}行あります")
+                print(f"  NaT行のsymbol: {nat_rows['symbol'].tolist() if 'symbol' in nat_rows.columns else 'N/A'}")
             
             # 12/26との比較（正常な日）
             normal_date = pd.to_datetime("2025-12-26")
@@ -97,6 +121,20 @@ def check_feature_scores():
                 print(f"    12/29の銘柄数: {len(target_symbols)}")
                 print(f"    12/29に存在する銘柄: {sorted(target_symbols)}")
                 print(f"    12/29に欠落した銘柄: {sorted(normal_symbols - target_symbols)}")
+                
+                # 12/26の各行のdate型とNaTチェック
+                print(f"\n  12/26のdate型チェック:")
+                normal_date_col = normal_df["date"]
+                normal_nat_count = pd.isna(normal_date_col).sum()
+                print(f"    date列のdtype: {normal_date_col.dtype}")
+                print(f"    NaT行数: {normal_nat_count}/{len(normal_df)}")
+                
+                # 12/29の各行のdate型とNaTチェック
+                print(f"\n  12/29のdate型チェック:")
+                target_date_col = target_df["date"]
+                target_nat_count = pd.isna(target_date_col).sum()
+                print(f"    date列のdtype: {target_date_col.dtype}")
+                print(f"    NaT行数: {target_nat_count}/{len(target_df)}")
     
     return df
 

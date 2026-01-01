@@ -55,14 +55,23 @@ def main() -> None:
             asof_date = asof.replace("-", "")
             date_path = outdir / f"{asof_date}_scores.parquet"
             if date_path.exists():
-                latest_path.symlink_to(f"{asof_date}_scores.parquet")
+                import os
+                # Windowsではhardlinkを試す（symlinkより権限問題が出にくい）
+                if os.name == "nt":  # Windows
+                    try:
+                        os.link(date_path, latest_path)
+                    except (OSError, AttributeError):
+                        # hardlink失敗時はsymlinkを試す
+                        latest_path.symlink_to(f"{asof_date}_scores.parquet")
+                else:
+                    latest_path.symlink_to(f"{asof_date}_scores.parquet")
             else:
                 scores.to_parquet(latest_path)
         else:
             # latestの場合は直接保存
             scores.to_parquet(latest_path)
     except Exception as e:
-        print(f"[run_scoring] symlink failed, fallback to copy: {e}")
+        print(f"[run_scoring] symlink/hardlink failed, fallback to copy: {e}")
         try:
             import shutil
             if asof != "latest":

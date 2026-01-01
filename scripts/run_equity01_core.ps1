@@ -205,10 +205,10 @@ try {
     # download_prices.pyのPROJECT_ROOTは既にequity01に設定済み（parents[2]）
     Invoke-CoreScript -ScriptPath "scripts\core\download_prices.py" -Arguments @("--universe", "data\intermediate\universe\latest_universe.parquet")
     
-    # 3. TOPIXデータ構築（tools配下だがcoreフローに必要）
-    $TpxScriptPath = Join-Path $ProjectRoot "scripts\tools\build_index_tpx_daily.py"
+    # 3. TOPIXデータ構築（data配下に移動済み）
+    $TpxScriptPath = Join-Path $ProjectRoot "scripts\data\build_index_tpx_daily.py"
     if (Test-Path $TpxScriptPath) {
-        Invoke-CoreScript -ScriptPath "scripts\tools\build_index_tpx_daily.py"
+        Invoke-CoreScript -ScriptPath "scripts\data\build_index_tpx_daily.py"
     }
     else {
         Write-Log "WARN: build_index_tpx_daily.py が見つかりません。スキップします。"

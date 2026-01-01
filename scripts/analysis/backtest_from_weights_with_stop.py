@@ -45,7 +45,7 @@ if str(ROOT_DIR) not in sys.path:
 
 import pandas as pd
 import numpy as np
-from scripts.tools import data_loader
+from scripts.tools.lib import data_loader
 
 # 共通定数からインバースETF ticker定数をインポート
 try:
@@ -221,14 +221,15 @@ def calculate_returns_from_weights(
         else:
             prices_df["ret_1d"] = prices_df["close"].pct_change()
     
-    # weightsの日付をソート
+    # 【修正】trade_dateの正本をpricesの営業日カレンダーにする
+    # weightsはasof mergeで前日ウェイトを持ち越す
+    trade_dates = sorted(prices_df["date"].unique())
+    
+    # weightsを日付でソート（asof merge用）
     df_weights = df_weights.sort_values(["date", "symbol"])
+    df_weights = df_weights.set_index("date")
     
-    # 日付ごとにリターンを計算
-    # 注意: weightsファイルには全営業日が含まれている前提（ラダーで維持する日も含む）
     rows = []
-    dates = sorted(df_weights["date"].unique())
-    
     cumulative = 1.0
     
     # Plan A用: STOP条件とinverse ETFリターンを準備
@@ -245,31 +246,37 @@ def calculate_returns_from_weights(
     
     # 日付ごとにリターンを計算（docs/return_definition.md参照）
     # port_ret[t] = sum_i w_i[t-1] * r_i[t]
-    for i, date in enumerate(dates):
+    for i, trade_date in enumerate(trade_dates):
         # i=0の場合は前日がないのでスキップ
         if i == 0:
             continue
         
         # 前日のweightsを取得（w[t-1]）
-        prev_date = dates[i - 1]
-        weights_day = df_weights[df_weights["date"] == prev_date].copy()
+        prev_date = trade_dates[i - 1]
         
+        # asof merge: 前日以前の最新のweightsを使用
+        weights_prev = df_weights[df_weights.index <= prev_date]
+        if weights_prev.empty:
+            continue
+        
+        # 前日の日付で最新のweightsを取得
+        weights_day = weights_prev[weights_prev.index == weights_prev.index.max()].copy()
         if weights_day.empty:
             continue
         
         # 前日のweightsをSeriesに変換（symbolをindexに）
-        weights_series = weights_day.set_index("symbol")["weight"]
+        weights_series = weights_day.reset_index().set_index("symbol")["weight"]
         
         # 当日の価格データを取得（r[t]）
         if "symbol" in prices_df.columns:
-            prices_day = prices_df[prices_df["date"] == date].copy()
+            prices_day = prices_df[prices_df["date"] == trade_date].copy()
             if prices_day.empty:
                 continue
             
             # symbolをindexに
             prices_day = prices_day.set_index("symbol")
         else:
-            prices_day = prices_df[prices_df["date"] == date].copy()
+            prices_day = prices_df[prices_df["date"] == trade_date].copy()
             if prices_day.empty:
                 continue
             prices_day = prices_day.set_index(prices_day.index)
@@ -277,7 +284,6 @@ def calculate_returns_from_weights(
         # 共通のsymbolを取得
         common_symbols = weights_series.index.intersection(prices_day.index)
         if len(common_symbols) == 0:
-            # weightsにないsymbolはスキップ
             continue
         
         # 共通symbolのweightsとreturnsを取得
@@ -295,7 +301,7 @@ def calculate_returns_from_weights(
         cumulative *= (1.0 + port_ret_cc)
         
         rows.append({
-            "trade_date": date,
+            "trade_date": trade_date,
             "port_ret_cc": port_ret_cc,
             "cumulative": cumulative,
         })
@@ -311,13 +317,32 @@ def calculate_returns_from_weights(
         df_tpx = pd.read_parquet(tpx_path)
         if "trade_date" in df_tpx.columns:
             df_tpx["trade_date"] = pd.to_datetime(df_tpx["trade_date"])
+            
+            # 【整合性チェック】trade_dateが営業日カレンダーに整合しているか確認
+            tpx_dates = set(df_tpx["trade_date"].unique())
+            result_dates = set(df_result["trade_date"].unique())
+            if not result_dates <= tpx_dates:
+                missing_in_tpx = result_dates - tpx_dates
+                print(f"[WARN] trade_date整合性: {len(missing_in_tpx)} days in result but not in TPX calendar")
+                print(f"[WARN] 例: {sorted(list(missing_in_tpx))[:5]}")
+            
             df_result = df_result.merge(
                 df_tpx[["trade_date", "tpx_ret_cc"]],
                 on="trade_date",
                 how="left"
             )
-            df_result["tpx_ret_cc"] = df_result["tpx_ret_cc"].ffill().bfill().fillna(0.0)
+            # bfill()は削除（ルックアヘッドバイアス回避）
+            # ffill()のみで前日値を持ち越す（未来データ注入なし）
+            df_result["tpx_ret_cc"] = df_result["tpx_ret_cc"].ffill()
+            
+            # 欠損が残る場合は警告ログを出して除外
+            missing = df_result["tpx_ret_cc"].isna().sum()
+            if missing > 0:
+                print(f"[WARN] TPX_MISSING n={missing} days; drop for alpha calc")
+            
             df_result["rel_alpha_daily"] = df_result["port_ret_cc"] - df_result["tpx_ret_cc"]
+            # α統計は欠損を除外したdfで計算
+            df_result = df_result.dropna(subset=["tpx_ret_cc"])
         else:
             df_result["tpx_ret_cc"] = 0.0
             df_result["rel_alpha_daily"] = df_result["port_ret_cc"]

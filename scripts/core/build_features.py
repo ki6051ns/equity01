@@ -27,6 +27,26 @@ from tools.lib import data_loader
 
 def main():
     prices = data_loader.load_prices()
+    
+    # 【修正】universeに含まれる銘柄のみをフィルタリング（1306.TなどのETF混入防止）
+    universe_path = Path("data/intermediate/universe/latest_universe.parquet")
+    if universe_path.exists():
+        df_universe = pd.read_parquet(universe_path)
+        if "ticker" in df_universe.columns:
+            universe_tickers = set(df_universe["ticker"].unique())
+            prices_before = len(prices)
+            prices = prices[prices["symbol"].isin(universe_tickers)].copy()
+            prices_after = len(prices)
+            excluded = prices_before - prices_after
+            if excluded > 0:
+                excluded_symbols = set(prices["symbol"].unique()) - universe_tickers if "symbol" in prices.columns else set()
+                print(f"[INFO] Universeフィルタリング: {excluded} rows excluded")
+                if excluded_symbols:
+                    print(f"[INFO] 除外されたsymbol: {sorted(excluded_symbols)}")
+        else:
+            print(f"[WARN] Universeファイルに'ticker'列がありません。フィルタリングをスキップします。")
+    else:
+        print(f"[WARN] Universeファイルが見つかりません: {universe_path}。フィルタリングをスキップします。")
 
     # ---------- カラム補正 ----------
     # date

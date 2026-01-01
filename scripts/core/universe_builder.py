@@ -79,7 +79,7 @@ def load_prices_local(prices_dir: str, tickers: List[str], asof: str, lookback: 
         out[t] = df
     return out
 
-def load_prices_yf(tickers: List[str], asof: str, lookback: int) -> Dict[str, pd.DataFrame]:
+def load_prices_yf(tickers: List[str], asof: str, lookback: int, prices_dir: str = "data/raw/prices") -> Dict[str, pd.DataFrame]:
     import yfinance as yf
     end = pd.to_datetime(asof) + pd.Timedelta(days=1)
     # 最適化: lookbackの2倍ではなく、1.2倍程度に短縮（必要な期間のみ取得）
@@ -146,8 +146,26 @@ def load_prices_yf(tickers: List[str], asof: str, lookback: int) -> Dict[str, pd
                 interval="1d",
                 auto_adjust=False,
                 progress=False,
+                threads=False,  # レート制限対策
             )
             if d is None or len(d) == 0:
+                # yfinance失敗時はローカル価格で補完を試行
+                logging.warning(f"yfinance returned empty for {t}, trying local prices")
+                local_prices = load_prices_local(prices_dir, [t], asof, lookback)
+                if t in local_prices and not local_prices[t].empty:
+                    # 前回終値を最新日として使用（当日欠損を埋める）
+                    df_local = local_prices[t].copy()
+                    last_close = df_local["close"].iloc[-1] if len(df_local) > 0 else None
+                    if last_close is not None:
+                        # 最新日として当日のデータを作成（前回終値を保持）
+                        latest_date = pd.to_datetime(asof)
+                        d_fallback = pd.DataFrame({
+                            "date": [latest_date],
+                            "close": [last_close],
+                            "volume": [0.0],  # 当日はvolume不明
+                        })
+                        out[t] = d_fallback
+                        logging.info(f"Using local last close for {t}: {last_close:.2f}")
                 continue
 
             # 列を正規化（Close/VolumeがDataFrameでもSeries化）
@@ -174,6 +192,21 @@ def load_prices_yf(tickers: List[str], asof: str, lookback: int) -> Dict[str, pd
             vol_raw   = _col(d, "Volume")
 
             if close_raw is None or vol_raw is None:
+                # yfinance失敗時はローカル価格で補完を試行
+                logging.warning(f"yfinance missing Close/Volume for {t}, trying local prices")
+                local_prices = load_prices_local(prices_dir, [t], asof, lookback)
+                if t in local_prices and not local_prices[t].empty:
+                    df_local = local_prices[t].copy()
+                    last_close = df_local["close"].iloc[-1] if len(df_local) > 0 else None
+                    if last_close is not None:
+                        latest_date = pd.to_datetime(asof)
+                        d_fallback = pd.DataFrame({
+                            "date": [latest_date],
+                            "close": [last_close],
+                            "volume": [0.0],
+                        })
+                        out[t] = d_fallback
+                        logging.info(f"Using local last close for {t}: {last_close:.2f}")
                 continue
 
             # インデックス→列（Date）
@@ -266,6 +299,7 @@ def main():
         if missing:
             yf_start = time.time()
             try:
+                # prices_dirを渡す（ローカル補完用）
                 prices.update(load_prices_yf(missing, asof, lookback))
                 yf_obtained = len([t for t in missing if t in prices])
                 logging.info(f"[TIMING] load_prices_yf: {time.time() - yf_start:.2f}秒 (取得銘柄数: {yf_obtained})")
@@ -297,7 +331,14 @@ def main():
                             latest = out_dir / cfg["output"].get("latest_name", "latest_universe.parquet")
                             try:
                                 if latest.exists() or latest.is_symlink(): latest.unlink()
-                                latest.symlink_to(out_path.name)
+                                # Windowsではhardlinkを試す
+                                if os.name == "nt":  # Windows
+                                    try:
+                                        os.link(out_path, latest)
+                                    except (OSError, AttributeError):
+                                        latest.symlink_to(out_path.name)
+                                else:
+                                    latest.symlink_to(out_path.name)
                             except Exception:
                                 import shutil
                                 shutil.copy2(out_path, latest)
@@ -326,10 +367,15 @@ def main():
     for t in tickers:
         df = prices.get(t)
         if df is None or len(df)<lookback//2:
+            # 欠損銘柄はrank計算から除外（選定に混ぜない）
+            logging.debug(f"Skipping {t}: insufficient price data (len={len(df) if df is not None else 0})")
             continue
         liq = compute_liquidity(df, lookback)
         if pd.notna(liq) and liq>0:
             recs.append({"ticker":t, "avg_turnover": liq})
+        else:
+            # 流動性が計算できない銘柄も除外
+            logging.debug(f"Skipping {t}: liquidity={liq}")
 
     uni = pd.DataFrame(recs)
     if uni.empty:
@@ -356,14 +402,23 @@ def main():
     uni.to_parquet(out_path, index=False, compression="snappy")
     logging.info(f"[TIMING] write_parquet: {time.time() - step_start:.2f}秒")
 
-    # latest シンボリック（Windowsで権限不可ならtry/except）
+    # latest シンボリック（Windowsで権限不可ならhardlink→copy）
     if cfg["output"].get("write_latest_symlink", True):
         latest = out_dir / cfg["output"].get("latest_name","latest_universe.parquet")
         try:
             if latest.exists() or latest.is_symlink(): latest.unlink()
-            latest.symlink_to(out_path.name)  # 相対symlink
+            # Windowsではhardlinkを試す（symlinkより権限問題が出にくい）
+            if os.name == "nt":  # Windows
+                try:
+                    # 同一ドライブならhardlinkを試す
+                    os.link(out_path, latest)
+                except (OSError, AttributeError):
+                    # hardlink失敗時はsymlinkを試す
+                    latest.symlink_to(out_path.name)  # 相対symlink
+            else:
+                latest.symlink_to(out_path.name)  # 相対symlink
         except Exception as e:
-            logging.warning(f"symlink failed, fallback to copy: {e}")
+            logging.warning(f"symlink/hardlink failed, fallback to copy: {e}")
             try:
                 import shutil
                 shutil.copy2(out_path, latest)

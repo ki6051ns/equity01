@@ -20,7 +20,26 @@ weightsの定義は「その日の保有比率」。ロングオンリーなら 
 """
 
 import sys
+import io
+import os
 from pathlib import Path
+
+# Windows環境での文字化け対策
+if sys.platform == 'win32':
+    # 環境変数を設定
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    # 標準出力のエンコーディングをUTF-8に設定
+    try:
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        else:
+            # Python 3.7以前の互換性
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        # 既に設定されている場合はスキップ
+        pass
 
 # プロジェクトルートをパスに追加
 ROOT_DIR = Path(__file__).resolve().parents[2]  # scripts/analysis/generate_variant_weights.py から2階層上
@@ -67,8 +86,8 @@ def generate_weights_for_variant(
     """
     # EventGuardは未完成のため削除（deprecated/2025Q4_pre_weights_fix/に移動）
     # from scripts.core.event_guard import EventGuard
-    from scripts.tools.weights_cleaning import clean_target_weights
-    from scripts.tools import data_loader
+    from scripts.analysis.weights_cleaning import clean_target_weights
+    from scripts.tools.lib import data_loader
     
     # 特徴量を読み込む
     feat_path = DATA_DIR / "daily_feature_scores.parquet"
@@ -85,7 +104,16 @@ def generate_weights_for_variant(
     if variant_key == "rank":
         score_col = "score_rank_only"
     elif variant_key == "zdownvol":
-        score_col = "score_z_downvol"
+        # score_z_downvolが存在しない場合はscore_z_linを使用
+        if "score_z_downvol" in df_features.columns:
+            score_col = "score_z_downvol"
+        elif "score_z_lin" in df_features.columns:
+            score_col = "score_z_lin"
+        else:
+            raise ValueError(
+                f"スコア列 'score_z_downvol' または 'score_z_lin' が存在しません。"
+                f"利用可能な列: {df_features.columns.tolist()}"
+            )
     else:
         raise ValueError(f"Unknown variant_key: {variant_key}")
     
@@ -109,6 +137,27 @@ def generate_weights_for_variant(
     
     # 価格データを読み込む（ladder方式のクリーニングに必要）
     prices = data_loader.load_prices()
+    
+    # 【修正】universeに含まれる銘柄のみをフィルタリング（1306.TなどのETF混入防止）
+    universe_path = Path("data/intermediate/universe/latest_universe.parquet")
+    if universe_path.exists():
+        df_universe = pd.read_parquet(universe_path)
+        if "ticker" in df_universe.columns:
+            universe_tickers = set(df_universe["ticker"].unique())
+            prices_before = len(prices)
+            prices = prices[prices["symbol"].isin(universe_tickers)].copy()
+            prices_after = len(prices)
+            excluded = prices_before - prices_after
+            if excluded > 0:
+                excluded_symbols = set(prices["symbol"].unique()) - universe_tickers if "symbol" in prices.columns else set()
+                print(f"[INFO] Universeフィルタリング: {excluded} rows excluded")
+                if excluded_symbols:
+                    print(f"[INFO] 除外されたsymbol: {sorted(excluded_symbols)}")
+        else:
+            print(f"[WARN] Universeファイルに'ticker'列がありません。フィルタリングをスキップします。")
+    else:
+        print(f"[WARN] Universeファイルが見つかりません: {universe_path}。フィルタリングをスキップします。")
+    
     prices["date"] = pd.to_datetime(prices["date"])
     prices_pivot = prices.pivot_table(
         index="date",

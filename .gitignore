@@ -42,6 +42,12 @@ data/processed/stop_regime_plots/**/*
 # Documentation history (Gitで管理する必要がない履歴)
 docs/history/**
 
+# Execution outputs (dry-run生成物)
+execution/execution_state/**/*
+execution/execution_outputs/**/*
+!execution/execution_state/.gitkeep
+!execution/execution_outputs/.gitkeep
+
 # Logs
 logs/*.log
 *.log

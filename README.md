@@ -1,5 +1,5 @@
 # equity01: AI駆動・日本株インテリジェント日次トレーディングシステム  
-**Version 3.2 / Updated: 2025-12-28（4th_commit: stg完了 → prod準備フェーズ移行）**
+**Version 3.3 / Updated: 2026-01-01（5th_commit: core vs backtest / alpha 完全一致検証完了）**
 
 equity01 は **AI駆動 × 正統クオンツ**によって構築された  
 日本株向け **インテリジェント日次トレーディングシステム**です。
@@ -7,13 +7,22 @@ equity01 は **AI駆動 × 正統クオンツ**によって構築された
 ALPHAERS（統合戦略）の中核である **Equity Strategy Layer** を担い、  
 **透明性・説明可能性・再現性・堅牢性** を最優先に設計されています。
 
-本バージョン（v3.2）は **4th_commit（stg完了 → prod準備フェーズ移行）** であり、  
+本バージョン（v3.3）は **5th_commit（core vs backtest / alpha 完全一致検証完了）** であり、  
+**数理・実装・意思決定すべて確定**という、きれいな区切りを達成しました。  
+core系列とbacktest系列の完全一致、alpha系列の完全一致により、  
+**ロジック差・ルックアヘッド・定義ズレは完全に排除**されました。
+
+**前バージョン（v3.2）**: **4th_commit（stg完了 → prod準備フェーズ移行）** で、  
 **coreパイプラインを「運用資産」として成立**させ、  
 **空状態から毎日再生成できる運用資産**として確立しました。
 
-**前バージョン（v3.1）**: **stg整理完了版** で、  
-**core（実運営正本）・analysis（weights研究）・deprecated（評価・比較・試行錯誤）の三層分離** を確立し、  
-**実行に必要な最小構成（core 6本・analysis 5本）** を固定しました。
+**5th_commit サマリ**:
+- ✅ **core系列とbacktest系列は完全一致**（日次リターン：最大差分 0.00e+00、許容誤差 1e-12 内で全日一致）
+- ✅ **alpha（対TOPIX）も完全一致**（alpha系列も max/mean 差分ともに 0）
+- ✅ **定義は w[t-1] * r[t] を正系として完全に確定**
+- ✅ **ロジック差・ルックアヘッド・定義ズレは完全に排除**
+- ✅ **検証ゲート（CI前提）として固定可能**な状態を達成
+- 📊 **次フェーズ**: 旧コード整理・pruning に集中可能
 
 ---
 
@@ -405,6 +414,42 @@ equity01/
   - CursorのRunはこのスクリプトのみを使用
   - 個別scriptをRunしたくなったら「それはstgではなくresearchに戻っている」と判断
 
+### core vs backtest 完全一致検証（5th_commit）
+
+- **検証スクリプト**: `scripts/ops/compare_core_vs_backtest.py`
+  - core系列とbacktest系列の完全一致検証（bitwise/許容誤差ゼロに近い）
+  - alpha系列（対TOPIX）の完全一致検証
+  - 不一致日の詳細ダンプ（w[t-1], r[t], beta, contrib等）
+
+**使用方法**:
+```bash
+# ベース戦略（ret[t] = Σw[t-1]*r[t]）の検証
+python scripts/ops/compare_core_vs_backtest.py
+
+# alpha系列も比較する場合
+python scripts/ops/compare_core_vs_backtest.py --alpha
+
+# betaタイプを指定（equity_cashまたはequity_cfd）
+python scripts/ops/compare_core_vs_backtest.py --alpha --beta-type equity_cash
+```
+
+**出力**:
+- `data/processed/diagnostics/core_vs_bt_diff_daily.csv` - 日次差分のCSV
+- `data/processed/diagnostics/core_vs_bt_alpha_diff_daily.csv` - alpha系列の差分CSV（--alphaオプション時）
+- `data/processed/diagnostics/mismatch_first_day.json` - 最初の不一致日の詳細（一致する場合は不一致なし）
+
+**検証結果（5th_commit）**:
+- ✅ **完全一致**: 最大絶対差分 0.00e+00、平均絶対差分 0.00e+00
+- ✅ **alpha完全一致**: alpha系列も max/mean 差分ともに 0
+- ✅ **検証ゲート（CI前提）として固定可能**: 今後の差分は価格データ更新・カレンダー・ユニバース・コスト/運用要因のみ
+
+**意味するところ**:
+- ロジック差・ルックアヘッド・定義ズレは完全に排除
+- 今後発生し得る差分は①価格データ更新 ②カレンダー ③ユニバース ④コスト/運用要因のみ
+- 旧パイプライン由来の return / weights 系は廃止して問題なし
+- stg / prd への移行条件を満たした状態
+- 次作業は旧コード整理・pruning に集中できる
+
 ### 評価・分析（deprecated）
 
 **注意**: 以下のスクリプトは `deprecated/2025Q4_pre_weights_fix/` に移動しました：
@@ -475,6 +520,26 @@ python scripts/stg_sanity_check.py
 ---
 
 # 📝 変更履歴
+
+- **v3.3 (2026-01-01)**: 5th_commit（core vs backtest / alpha 完全一致検証完了）
+  - **技術的結論**:
+    - core系列とbacktest系列は完全一致（日次リターン：最大差分 0.00e+00、許容誤差 1e-12 内で全日一致）
+    - alpha（対TOPIX）も完全一致（alpha系列も max/mean 差分ともに 0）
+    - 定義は w[t-1] * r[t] を正系として完全に確定
+  - **意味するところ**:
+    - ロジック差・ルックアヘッド・定義ズレは完全に排除
+    - 今後発生し得る差分は①価格データ更新 ②カレンダー ③ユニバース ④コスト/運用要因のみ
+    - 旧パイプライン由来の return / weights 系は廃止して問題なし
+  - **成果物**:
+    - `scripts/ops/compare_core_vs_backtest.py` - core vs backtest完全一致検証スクリプト
+    - 差分CSV（return / alpha）：全ゼロ
+    - mismatch_first_day.json：不一致なし
+    - core / backtest / alpha の三点同時合格
+  - **次フェーズへの示唆**:
+    - 本スクリプトを検証ゲート（CI前提）として固定可能
+    - stg / prd への移行条件を満たした状態
+    - 次作業は旧コード整理・pruning に集中できる
+  - **総括**: 「数理・実装・意思決定すべて確定」という、きれいな区切りを達成
 
 - **v3.2 (2025-12-28)**: 4th_commit（stg完了 → prod準備フェーズ移行）
   - **stgフェーズの目的と到達点**:
@@ -557,4 +622,4 @@ python scripts/stg_sanity_check.py
 
 **Prepared by**  
 equity01 / Strategy Core Layer  
-Research Plan v3.2（4th_commit: stg完了 → prod準備フェーズ移行 / Updated 2025-12-28）
+Research Plan v3.3（5th_commit: core vs backtest / alpha 完全一致検証完了 / Updated 2026-01-01）
